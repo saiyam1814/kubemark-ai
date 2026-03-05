@@ -1,0 +1,103 @@
+{{- if eq .Values.benchmark.type "nccl" }}
+{{- $gpusPerNode := include "kubemark-ai.gpusPerNode" . | int }}
+{{- $numNodes := include "kubemark-ai.numNodes" . | int }}
+{{- range .Values.benchmark.ncclTests }}
+---
+apiVersion: kubeflow.org/v2beta1
+kind: MPIJob
+metadata:
+  name: {{ include "kubemark-ai.fullname" $ }}-nccl-{{ . }}
+  labels:
+    {{- include "kubemark-ai.labels" $ | nindent 4 }}
+    benchmark: nccl
+    test: {{ . }}
+spec:
+  slotsPerWorker: {{ $gpusPerNode }}
+  runPolicy:
+    cleanPodPolicy: Running
+    ttlSecondsAfterFinished: {{ $.Values.ttlSecondsAfterFinished }}
+  mpiReplicaSpecs:
+    Launcher:
+      replicas: 1
+      template:
+        spec:
+          containers:
+            - name: launcher
+              image: {{ $.Values.nccl.image }}
+              env:
+                - name: OMPI_ALLOW_RUN_AS_ROOT
+                  value: "1"
+                - name: OMPI_ALLOW_RUN_AS_ROOT_CONFIRM
+                  value: "1"
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  echo "=== kubemark-ai NCCL {{ . | replace "-" " " | title }} Benchmark ==="
+                  echo "GPUs: {{ $.Values.gpu.totalGPUs }} ({{ $numNodes }} nodes x {{ $gpusPerNode }} GPUs/node)"
+                  echo "GPU Type: {{ $.Values.gpu.type }}"
+                  echo "Start: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                  echo "========================================"
+
+                  {{- $binary := "all_reduce_perf" }}
+                  {{- if eq . "all-gather" }}{{ $binary = "all_gather_perf" }}{{- end }}
+                  {{- if eq . "reduce-scatter" }}{{ $binary = "reduce_scatter_perf" }}{{- end }}
+
+                  mpirun \
+                    --allow-run-as-root \
+                    -np {{ $.Values.gpu.totalGPUs }} \
+                    -bind-to none \
+                    -map-by slot \
+                    -x LD_LIBRARY_PATH \
+                    -x NCCL_DEBUG={{ $.Values.nccl.debug }} \
+                    -x NCCL_SOCKET_IFNAME={{ $.Values.nccl.socketIfname }} \
+                    -x NCCL_IB_DISABLE={{ $.Values.nccl.ibDisable }} \
+                    -mca pml ob1 \
+                    -mca btl ^openib \
+                    /opt/nccl_tests/build/{{ $binary }} \
+                      -b {{ $.Values.nccl.minBytes }} \
+                      -e {{ $.Values.nccl.maxBytes }} \
+                      -f {{ $.Values.nccl.stepFactor }} \
+                      -g 1 \
+                      -n {{ $.Values.nccl.iterations }} \
+                      -w {{ $.Values.nccl.warmup }}
+
+                  echo "End: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              resources:
+                requests:
+                  cpu: "1"
+                  memory: 256Mi
+    Worker:
+      replicas: {{ $numNodes }}
+      template:
+        metadata:
+          labels:
+            {{- include "kubemark-ai.labels" $ | nindent 12 }}
+            benchmark: nccl
+            test: {{ . }}
+        spec:
+          {{- with $.Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $.Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: worker
+              image: {{ $.Values.nccl.image }}
+              resources:
+                requests:
+                  nvidia.com/gpu: {{ $gpusPerNode }}
+                limits:
+                  nvidia.com/gpu: {{ $gpusPerNode }}
+              volumeMounts:
+                - mountPath: /dev/shm
+                  name: dshm
+          volumes:
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: {{ $.Values.shmSize }}
+{{- end }}
+{{- end }}

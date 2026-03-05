@@ -1,0 +1,148 @@
+apiVersion: kubeflow.org/v2beta1
+kind: MPIJob
+metadata:
+  name: train-llama31-8b-${RUN_ID}
+  namespace: ${NAMESPACE}
+  labels:
+    app: kubemark-ai
+    benchmark: training
+    model: llama31-8b
+    run-id: "${RUN_ID}"
+spec:
+  slotsPerWorker: ${GPUS_PER_NODE}
+  runPolicy:
+    cleanPodPolicy: Running
+    ttlSecondsAfterFinished: 600
+  mpiReplicaSpecs:
+    Launcher:
+      replicas: 1
+      template:
+        spec:
+          containers:
+            - name: launcher
+              image: nvcr.io/nvidia/nemo:25.11.01
+              env:
+                - name: OMPI_ALLOW_RUN_AS_ROOT
+                  value: "1"
+                - name: OMPI_ALLOW_RUN_AS_ROOT_CONFIRM
+                  value: "1"
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  echo "========================================================"
+                  echo "  kubemark-ai Training Benchmark: Llama 3.1 8B"
+                  echo "  GPUs: ${TOTAL_GPUS} (${NUM_NODES} nodes x ${GPUS_PER_NODE} GPUs/node)"
+                  echo "  GPU Type: ${GPU_TYPE} | Dtype: ${DTYPE}"
+                  echo "  Run ID: ${RUN_ID}"
+                  echo "  Start: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                  echo "========================================================"
+
+                  # Parallelism config from NVIDIA dgxc-benchmarking
+                  # Llama 3.1 8B is a dense model — fits on a single node
+                  case "${GPU_TYPE}" in
+                    gb300|gb200)
+                      TP=1; PP=1; CP=1; MBS=4
+                      ;;
+                    b200)
+                      TP=1; PP=1; CP=1; MBS=2
+                      ;;
+                    h100)
+                      TP=1; PP=1; CP=1; MBS=2
+                      ;;
+                    *)
+                      echo "Unsupported GPU type: ${GPU_TYPE}"
+                      exit 1
+                      ;;
+                  esac
+
+                  WORLD_SIZE=$((TP * PP))
+                  DP=$((${TOTAL_GPUS} / WORLD_SIZE))
+                  GBS=$((DP * MBS))
+                  MAX_STEPS=50
+                  SEQ_LEN=8192
+
+                  echo ""
+                  echo "Parallelism: TP=$TP PP=$PP CP=$CP DP=$DP"
+                  echo "Batch: MBS=$MBS GBS=$GBS"
+                  echo "Steps: $MAX_STEPS | Seq Length: $SEQ_LEN"
+                  echo ""
+
+                  FP8_FLAGS=""
+                  if [[ "${DTYPE}" == "fp8" ]]; then
+                    FP8_FLAGS="--fp8-format hybrid --fp8-amax-history-len 1024 --fp8-amax-compute-algo max"
+                  fi
+
+                  mpirun \
+                    --allow-run-as-root \
+                    -np ${TOTAL_GPUS} \
+                    -bind-to none \
+                    -map-by slot \
+                    -x LD_LIBRARY_PATH \
+                    -x CUDA_DEVICE_MAX_CONNECTIONS=1 \
+                    -x NCCL_DEBUG=${NCCL_DEBUG:-WARN} \
+                    -x NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-eth0} \
+                    -x NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-0} \
+                    -x HF_TOKEN \
+                    -mca pml ob1 \
+                    -mca btl ^openib \
+                    python3 -m megatron.core.scripts.train \
+                      --model llama3 \
+                      --model-size 8b \
+                      --tensor-model-parallel-size $TP \
+                      --pipeline-model-parallel-size $PP \
+                      --context-parallel-size $CP \
+                      --micro-batch-size $MBS \
+                      --global-batch-size $GBS \
+                      --seq-length $SEQ_LEN \
+                      --max-steps $MAX_STEPS \
+                      --tokenizer-type HuggingFaceTokenizer \
+                      --tokenizer-model meta-llama/Llama-3.1-8B \
+                      --use-distributed-optimizer \
+                      --overlap-grad-reduce \
+                      --overlap-param-gather \
+                      $FP8_FLAGS \
+                      --log-interval 1
+
+                  echo "========================================================"
+                  echo "  Complete: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                  echo "========================================================"
+              resources:
+                requests:
+                  cpu: "4"
+                  memory: 1Gi
+    Worker:
+      replicas: ${NUM_NODES}
+      template:
+        metadata:
+          labels:
+            app: kubemark-ai
+            benchmark: training
+            model: llama31-8b
+            run-id: "${RUN_ID}"
+        spec:
+          imagePullSecrets:
+            - name: ngc-secret
+          containers:
+            - name: worker
+              image: nvcr.io/nvidia/nemo:25.11.01
+              env:
+                - name: HF_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: hf-token
+                      key: token
+                - name: CUDA_DEVICE_MAX_CONNECTIONS
+                  value: "1"
+              resources:
+                requests:
+                  nvidia.com/gpu: ${GPUS_PER_NODE}
+                limits:
+                  nvidia.com/gpu: ${GPUS_PER_NODE}
+              volumeMounts:
+                - mountPath: /dev/shm
+                  name: dshm
+          volumes:
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: 64Gi

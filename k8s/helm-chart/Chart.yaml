@@ -1,0 +1,19 @@
+apiVersion: v2
+name: kubemark-ai
+description: GPU benchmarking on Kubernetes — wrapping NVIDIA DGX Cloud Benchmarks for K8s
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+home: https://github.com/kubemark-ai/kubemark-ai
+keywords:
+  - gpu
+  - benchmark
+  - nccl
+  - nvidia
+  - dgx
+  - kubernetes
+  - ai
+  - training
+  - vcluster
+maintainers:
+  - name: Saiyam Pathak

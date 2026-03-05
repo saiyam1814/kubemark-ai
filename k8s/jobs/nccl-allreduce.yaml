@@ -1,0 +1,89 @@
+apiVersion: kubeflow.org/v2beta1
+kind: MPIJob
+metadata:
+  name: nccl-ar-${SHORT_ID}
+  namespace: ${NAMESPACE}
+  labels:
+    app: kubemark-ai
+    benchmark: nccl
+    test: all-reduce
+    run-id: "${RUN_ID}"
+spec:
+  slotsPerWorker: ${GPUS_PER_NODE}
+  runPolicy:
+    cleanPodPolicy: Running
+    ttlSecondsAfterFinished: 600
+  mpiReplicaSpecs:
+    Launcher:
+      replicas: 1
+      template:
+        spec:
+          containers:
+            - name: launcher
+              image: ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.28.3-1-8b67957
+              env:
+                - name: OMPI_ALLOW_RUN_AS_ROOT
+                  value: "1"
+                - name: OMPI_ALLOW_RUN_AS_ROOT_CONFIRM
+                  value: "1"
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  echo "=== kubemark-ai NCCL AllReduce Benchmark ==="
+                  echo "GPUs: ${TOTAL_GPUS} (${NUM_NODES} nodes x ${GPUS_PER_NODE} GPUs/node)"
+                  echo "GPU Type: ${GPU_TYPE}"
+                  echo "Run ID: ${RUN_ID}"
+                  echo "Start: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                  echo "========================================"
+
+                  mpirun \
+                    --allow-run-as-root \
+                    -np ${TOTAL_GPUS} \
+                    -bind-to none \
+                    -map-by slot \
+                    -x LD_LIBRARY_PATH \
+                    -x NCCL_DEBUG=${NCCL_DEBUG:-WARN} \
+                    -x NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-eth0} \
+                    -x NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-0} \
+                    -mca pml ob1 \
+                    -mca btl ^openib \
+                    /opt/nccl_tests/build/all_reduce_perf \
+                      -b 8 \
+                      -e 16G \
+                      -f 2 \
+                      -g 1 \
+                      -n 20 \
+                      -w 5
+
+                  echo "========================================"
+                  echo "End: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              resources:
+                requests:
+                  cpu: "1"
+                  memory: 256Mi
+    Worker:
+      replicas: ${NUM_NODES}
+      template:
+        metadata:
+          labels:
+            app: kubemark-ai
+            benchmark: nccl
+            test: all-reduce
+            run-id: "${RUN_ID}"
+        spec:
+          containers:
+            - name: worker
+              image: ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.28.3-1-8b67957
+              resources:
+                requests:
+                  nvidia.com/gpu: ${GPUS_PER_NODE}
+                limits:
+                  nvidia.com/gpu: ${GPUS_PER_NODE}
+              volumeMounts:
+                - mountPath: /dev/shm
+                  name: dshm
+          volumes:
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: 32Gi

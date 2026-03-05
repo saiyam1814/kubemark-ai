@@ -1,0 +1,44 @@
+# kubemark-ai: vCluster configuration for GPU benchmark isolation
+#
+# vCluster virtualizes the K8s control plane only — zero data-plane overhead.
+# Pods run directly on host nodes with full GPU/RDMA hardware access.
+# This means benchmark results inside a vCluster are identical to bare metal.
+
+sync:
+  toHost:
+    pods:
+      enabled: true
+    services:
+      enabled: true
+    persistentVolumeClaims:
+      enabled: true
+    configMaps:
+      enabled: true
+    secrets:
+      enabled: true
+
+  fromHost:
+    nodes:
+      enabled: true
+      selector:
+        all: true
+    csiDrivers:
+      enabled: true
+    csiNodes:
+      enabled: true
+    storageClasses:
+      enabled: true
+
+networking:
+  advanced:
+    fallbackHostCluster: true
+
+controlPlane:
+  statefulSet:
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 512Mi

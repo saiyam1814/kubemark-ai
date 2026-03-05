@@ -1,0 +1,83 @@
+# kubemark-ai Helm chart values
+
+benchmark:
+  # Benchmark type: nccl or training
+  type: nccl
+
+  # NCCL test(s) to run: all-reduce, all-gather, reduce-scatter, full-suite
+  ncclTests:
+    - all-reduce
+
+  # Training model (when type=training): qwen3-30b, llama31-8b
+  model: ""
+
+  # Data type for training: bf16, fp8
+  dtype: bf16
+
+gpu:
+  # GPU type: h100, b200, gb200, gb300, a100
+  type: h100
+
+  # Total GPUs to use
+  totalGPUs: 8
+
+  # GPUs per node (auto-derived from gpu.type if not set)
+  # h100/b200/a100: 8, gb200/gb300: 4
+  gpusPerNode: 8
+
+  # Number of nodes (auto-calculated: totalGPUs / gpusPerNode)
+  nodes: 1
+
+nccl:
+  # Container image for NCCL benchmarks
+  image: ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.28.3-1-8b67957
+
+  # NCCL test parameters (from NVIDIA dgxc-benchmarking testset.toml)
+  minBytes: "8"
+  maxBytes: "16G"
+  stepFactor: 2
+  iterations: 20
+  warmup: 5
+
+  # NCCL environment tuning
+  debug: "WARN"
+  socketIfname: "eth0"
+  ibDisable: "0"
+
+  # InfiniBand HCA (uncomment and set for IB networks)
+  # ibHCA: "ibp"
+
+training:
+  # NeMo container image
+  image: nvcr.io/nvidia/nemo:25.11.01
+
+  # Max training steps (50 is enough to measure iterations 35-44)
+  maxSteps: 50
+
+  # Requires NGC and HuggingFace secrets
+  # Create them before installing:
+  #   kubectl create secret docker-registry ngc-secret ...
+  #   kubectl create secret generic hf-token ...
+  ngcSecretName: ngc-secret
+  hfSecretName: hf-token
+
+# Shared memory size for NCCL
+shmSize: 32Gi
+
+# Training shared memory (larger for model weights)
+trainingShmSize: 64Gi
+
+# Node selector for GPU nodes (optional)
+nodeSelector: {}
+# Example:
+#   nvidia.com/gpu.product: "NVIDIA-H100-80GB-HBM3"
+
+# Tolerations for GPU nodes (optional)
+tolerations: []
+# Example:
+#   - key: "nvidia.com/gpu"
+#     operator: "Exists"
+#     effect: "NoSchedule"
+
+# Job cleanup
+ttlSecondsAfterFinished: 600

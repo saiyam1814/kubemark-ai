@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>kubemark-ai Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="header-content">
+      <h1>kubemark-ai</h1>
+      <p class="subtitle">GPU Benchmarking on Kubernetes</p>
+    </div>
+    <div class="header-actions">
+      <button id="refresh-btn" onclick="loadResults()">Refresh</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="nccl">NCCL Benchmarks</button>
+    <button class="tab" data-tab="training">Training Benchmarks</button>
+    <button class="tab" data-tab="compare">Compare Runs</button>
+  </nav>
+
+  <main>
+    <!-- NCCL Tab -->
+    <section id="nccl-tab" class="tab-content active">
+      <div class="run-selector">
+        <label>Select Run:</label>
+        <select id="nccl-run-select" onchange="renderNCCLRun()"></select>
+      </div>
+      <div class="stats-grid" id="nccl-stats"></div>
+      <div id="nccl-rating" class="rating-box"></div>
+      <div class="chart-container">
+        <h3>Bus Bandwidth by Message Size</h3>
+        <p class="chart-help">Shows how fast GPUs can exchange data at different message sizes. The curve should plateau at large sizes &mdash; that plateau is your effective inter-GPU bandwidth. Higher is better.</p>
+        <canvas id="nccl-bandwidth-chart"></canvas>
+      </div>
+      <div class="chart-container">
+        <h3>Latency by Message Size</h3>
+        <p class="chart-help">Time to complete each collective operation. Small messages are latency-bound (fixed overhead). Large messages are bandwidth-bound. Lower is better.</p>
+        <canvas id="nccl-latency-chart"></canvas>
+      </div>
+      <div class="info-box">
+        <h3>Understanding NCCL Benchmark Results</h3>
+        <div class="info-grid">
+          <div class="info-item">
+            <strong>Bus Bandwidth (GB/s)</strong>
+            <p>Measures the effective data transfer rate across all GPUs for collective operations. This is the key metric &mdash; it tells you how well your GPUs can work together. NVLink-connected GPUs (H100, A100 in DGX) achieve 200-300+ GB/s. PCIe-connected GPUs (L40S, RTX) typically reach 15-25 GB/s.</p>
+          </div>
+          <div class="info-item">
+            <strong>Algorithm Bandwidth (GB/s)</strong>
+            <p>Raw data moved divided by time. Bus bandwidth adjusts for the communication pattern (e.g., AllReduce sends data across a ring), making it the fairer comparison metric across different GPU counts.</p>
+          </div>
+          <div class="info-item">
+            <strong>Message Size</strong>
+            <p>The amount of data exchanged per operation. Small messages (KB) test latency. Large messages (MB-GB) test bandwidth. Real training workloads use large messages, so the right side of the chart matters most.</p>
+          </div>
+          <div class="info-item">
+            <strong>What's &ldquo;good&rdquo;?</strong>
+            <p>Compare your peak bandwidth to NVIDIA's published numbers for your GPU type. Within 90% of reference = excellent. 70-90% = good (check network config). Below 70% = investigate (wrong NCCL settings, no NVLink/IB, driver issues).</p>
+          </div>
+        </div>
+        <div class="reference-table">
+          <h4>NVIDIA Reference Baselines (AllReduce, large messages)</h4>
+          <table>
+            <thead><tr><th>GPU Config</th><th>Interconnect</th><th>Expected Bandwidth</th></tr></thead>
+            <tbody>
+              <tr><td>H100 x8 (1 node)</td><td>NVLink 4.0</td><td>~280-310 GB/s</td></tr>
+              <tr><td>H100 x16 (2 nodes)</td><td>NVLink + InfiniBand</td><td>~240-280 GB/s</td></tr>
+              <tr><td>A100 x8 (1 node)</td><td>NVLink 3.0</td><td>~220-250 GB/s</td></tr>
+              <tr><td>L40S x2</td><td>PCIe Gen4</td><td>~20-25 GB/s</td></tr>
+              <tr><td>RTX 4000/6000</td><td>PCIe Gen4</td><td>~15-20 GB/s</td></tr>
+              <tr><td>T4 / V100 (PCIe)</td><td>PCIe Gen3</td><td>~8-12 GB/s</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Training Tab -->
+    <section id="training-tab" class="tab-content">
+      <div class="run-selector">
+        <label>Select Run:</label>
+        <select id="training-run-select" onchange="renderTrainingRun()"></select>
+      </div>
+      <div class="stats-grid" id="training-stats"></div>
+      <div class="chart-container">
+        <h3>TFLOPS per GPU</h3>
+        <p class="chart-help">Trillion floating-point operations per second per GPU. Measures how efficiently GPUs are utilized during training. Higher = better hardware utilization.</p>
+        <canvas id="training-tflops-chart"></canvas>
+      </div>
+      <div class="info-box">
+        <h3>Understanding Training Benchmark Results</h3>
+        <div class="info-grid">
+          <div class="info-item">
+            <strong>TFLOPS/GPU</strong>
+            <p>Trillion floating-point operations per second per GPU. This is the primary metric for training throughput. It captures both compute and communication efficiency. Higher means your GPUs are spending more time computing and less time waiting.</p>
+          </div>
+          <div class="info-item">
+            <strong>Step Time (ms)</strong>
+            <p>Time per training iteration. Lower is better. This directly translates to training speed: halving step time = training twice as fast. Affected by model size, parallelism strategy, and GPU interconnect speed.</p>
+          </div>
+          <div class="info-item">
+            <strong>Iterations 35-44</strong>
+            <p>We measure iterations 35-44 (not the first ones) because early iterations include warmup effects like JIT compilation and memory allocation. This matches NVIDIA's official measurement methodology.</p>
+          </div>
+          <div class="info-item">
+            <strong>Parallelism</strong>
+            <p>Training uses Tensor Parallel (TP), Pipeline Parallel (PP), Expert Parallel (EP), and Data Parallel (DP). The parallelism config is auto-selected based on your GPU type to match NVIDIA's optimal settings.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Compare Tab -->
+    <section id="compare-tab" class="tab-content">
+      <div class="compare-controls">
+        <div>
+          <label>Run A:</label>
+          <select id="compare-a"></select>
+        </div>
+        <div>
+          <label>Run B:</label>
+          <select id="compare-b"></select>
+        </div>
+        <button onclick="renderComparison()">Compare</button>
+      </div>
+      <div class="chart-container">
+        <h3>Bandwidth Comparison</h3>
+        <p class="chart-help">Overlay two benchmark runs to compare performance. Useful for comparing GPU types, node counts, or before/after infrastructure changes.</p>
+        <canvas id="compare-chart"></canvas>
+      </div>
+      <div id="compare-summary" class="info-box" style="display:none;"></div>
+    </section>
+
+    <!-- Empty state -->
+    <section id="empty-state" class="tab-content" style="display:none;">
+      <div class="empty">
+        <h2>No benchmark results yet</h2>
+        <p>Run a benchmark to see results here:</p>
+        <pre>./scripts/run-benchmark.sh nccl --gpus 8 --gpu-type h100</pre>
+        <p style="margin-top:16px;">Or try direct mode (no Kubernetes needed):</p>
+        <pre>./scripts/run-direct.sh nccl</pre>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>kubemark-ai &mdash; GPU Benchmarking on Kubernetes &mdash; Wrapping <a href="https://github.com/NVIDIA/dgxc-benchmarking" style="color:var(--accent);">NVIDIA DGX Cloud Benchmarks</a> for K8s</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

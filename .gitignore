@@ -1,0 +1,7 @@
+results/
+!results/.gitkeep
+*.log
+.env
+.DS_Store
+__pycache__/
+*.pyc

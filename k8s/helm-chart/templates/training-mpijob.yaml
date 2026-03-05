@@ -1,0 +1,131 @@
+{{- if eq .Values.benchmark.type "training" }}
+{{- $gpusPerNode := include "kubemark-ai.gpusPerNode" . | int }}
+{{- $numNodes := include "kubemark-ai.numNodes" . | int }}
+apiVersion: kubeflow.org/v2beta1
+kind: MPIJob
+metadata:
+  name: {{ include "kubemark-ai.fullname" . }}-train-{{ .Values.benchmark.model }}
+  labels:
+    {{- include "kubemark-ai.labels" . | nindent 4 }}
+    benchmark: training
+    model: {{ .Values.benchmark.model }}
+spec:
+  slotsPerWorker: {{ $gpusPerNode }}
+  runPolicy:
+    cleanPodPolicy: Running
+    ttlSecondsAfterFinished: {{ .Values.ttlSecondsAfterFinished }}
+  mpiReplicaSpecs:
+    Launcher:
+      replicas: 1
+      template:
+        spec:
+          containers:
+            - name: launcher
+              image: {{ .Values.training.image }}
+              env:
+                - name: OMPI_ALLOW_RUN_AS_ROOT
+                  value: "1"
+                - name: OMPI_ALLOW_RUN_AS_ROOT_CONFIRM
+                  value: "1"
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  echo "=== kubemark-ai Training Benchmark: {{ .Values.benchmark.model }} ==="
+                  echo "GPUs: {{ .Values.gpu.totalGPUs }} | GPU Type: {{ .Values.gpu.type }} | Dtype: {{ .Values.benchmark.dtype }}"
+                  echo "Start: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+                  {{- if eq .Values.benchmark.model "qwen3-30b" }}
+                  case "{{ .Values.gpu.type }}" in
+                    gb300|gb200) TP=1; PP=1; EP=8; VP=1; MBS=4 ;;
+                    b200)        TP=1; PP=1; EP=8; VP=1; MBS=1 ;;
+                    h100)        TP=1; PP=2; EP=8; VP=12; MBS=1 ;;
+                    *)           echo "Unsupported GPU type"; exit 1 ;;
+                  esac
+                  MODEL_ARGS="--model qwen3 --model-size 30b --expert-model-parallel-size \$EP --num-layers-per-virtual-pipeline-stage \$VP --tokenizer-model Qwen/Qwen3-30B-A3B"
+                  WORLD_SIZE=$((TP * PP * EP))
+                  SEQ_LEN=4096
+                  {{- else if eq .Values.benchmark.model "llama31-8b" }}
+                  TP=1; PP=1; MBS=2; EP=1
+                  MODEL_ARGS="--model llama3 --model-size 8b --tokenizer-model meta-llama/Llama-3.1-8B"
+                  WORLD_SIZE=$((TP * PP))
+                  SEQ_LEN=8192
+                  {{- end }}
+
+                  DP=$(( {{ .Values.gpu.totalGPUs }} / WORLD_SIZE ))
+                  GBS=$((DP * MBS))
+
+                  FP8_FLAGS=""
+                  {{- if eq .Values.benchmark.dtype "fp8" }}
+                  FP8_FLAGS="--fp8-format hybrid --fp8-amax-history-len 1024 --fp8-amax-compute-algo max"
+                  {{- end }}
+
+                  mpirun --allow-run-as-root \
+                    -np {{ .Values.gpu.totalGPUs }} \
+                    -bind-to none -map-by slot \
+                    -x LD_LIBRARY_PATH -x CUDA_DEVICE_MAX_CONNECTIONS=1 \
+                    -x NCCL_DEBUG={{ .Values.nccl.debug }} \
+                    -x NCCL_SOCKET_IFNAME={{ .Values.nccl.socketIfname }} \
+                    -x HF_TOKEN \
+                    -mca pml ob1 -mca btl ^openib \
+                    python3 -m megatron.core.scripts.train \
+                      $MODEL_ARGS \
+                      --tensor-model-parallel-size $TP \
+                      --pipeline-model-parallel-size $PP \
+                      --micro-batch-size $MBS \
+                      --global-batch-size $GBS \
+                      --seq-length $SEQ_LEN \
+                      --max-steps {{ .Values.training.maxSteps }} \
+                      --tokenizer-type HuggingFaceTokenizer \
+                      --use-distributed-optimizer \
+                      --overlap-grad-reduce --overlap-param-gather \
+                      $FP8_FLAGS --log-interval 1
+
+                  echo "Complete: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              resources:
+                requests:
+                  cpu: "4"
+                  memory: 1Gi
+    Worker:
+      replicas: {{ $numNodes }}
+      template:
+        metadata:
+          labels:
+            {{- include "kubemark-ai.labels" . | nindent 12 }}
+            benchmark: training
+            model: {{ .Values.benchmark.model }}
+        spec:
+          imagePullSecrets:
+            - name: {{ .Values.training.ngcSecretName }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: worker
+              image: {{ .Values.training.image }}
+              env:
+                - name: HF_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.training.hfSecretName }}
+                      key: token
+                - name: CUDA_DEVICE_MAX_CONNECTIONS
+                  value: "1"
+              resources:
+                requests:
+                  nvidia.com/gpu: {{ $gpusPerNode }}
+                limits:
+                  nvidia.com/gpu: {{ $gpusPerNode }}
+              volumeMounts:
+                - mountPath: /dev/shm
+                  name: dshm
+          volumes:
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: {{ .Values.trainingShmSize }}
+{{- end }}
