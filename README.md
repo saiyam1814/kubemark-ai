@@ -277,10 +277,20 @@ kubemark-ai/
 
 NCCL benchmark results vary significantly by interconnect type. Use this table to interpret your numbers:
 
+**NVIDIA DGXC Benchmarking (primary source for H100, B200, GB200, GB300):**
+
+| GPU | Interconnect | Published NCCL Bandwidth | Source |
+|-----|-------------|-------------------------|--------|
+| H100 SXM x8 | NVLink 4.0 (900 GB/s/GPU) | **159.15 GB/s avg**, 480 GB/s peak | [NVIDIA dgxc-benchmarking sample](https://github.com/NVIDIA/dgxc-benchmarking/blob/main/nccl/README.md) |
+| B200 x8 | NVLink 5.0 (1.8 TB/s/GPU) | No published NCCL numbers yet | [dgxc-benchmarking specs](https://github.com/NVIDIA/dgxc-benchmarking#reference-infrastructure) |
+| GB200 | NVLink 5.0 (1.8 TB/s/GPU) | No published NCCL numbers yet | [dgxc-benchmarking specs](https://github.com/NVIDIA/dgxc-benchmarking#reference-infrastructure) |
+| GB300 | NVLink 5.0 (1.8 TB/s/GPU) | No published NCCL numbers yet | [dgxc-benchmarking specs](https://github.com/NVIDIA/dgxc-benchmarking#reference-infrastructure) |
+
+**Community and supplementary sources:**
+
 | Interconnect | Expected AllReduce BusBW | Source |
 |-------------|-------------------------|--------|
-| NVLink 4.0 (DGX H100) | ~450 GB/s | [NVIDIA NVSwitch Blog](https://developer.nvidia.com/blog/?p=53977) |
-| NVLink 3.0 (DGX A100) | ~150 GB/s | [NVIDIA NVSwitch Blog](https://developer.nvidia.com/blog/?p=53977) |
+| DGX A100 NVLink 3.0 | ~150 GB/s | [NVIDIA NVSwitch Blog](https://developer.nvidia.com/blog/?p=53977) |
 | 400Gb/s InfiniBand (multi-node) | ~461 GB/s | [Azure HPC Blog](https://techcommunity.microsoft.com/blog/azurehighperformancecomputingblog/performance-at-scale-the-role-of-interconnects-in-azure-hpc--ai-infrastructure/4427238) |
 | PCIe Gen4 P2P (L40S, L4, A10G) | ~8-22 GB/s | [NVIDIA nccl-tests PERFORMANCE.md](https://github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md) |
 | PCIe Gen3 (T4, V100 PCIe) | ~5-12 GB/s | [NVIDIA nccl-tests PERFORMANCE.md](https://github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md) |
@@ -300,12 +310,15 @@ Single-GPU runs measure internal GPU memory bandwidth, not inter-GPU communicati
 - [Kubeflow MPI Operator](https://github.com/kubeflow/mpi-operator) — MPIJob CRD for multi-node GPU jobs
 - [vCluster](https://www.vcluster.com/) — virtual clusters for benchmark isolation
 
-**Reference numbers used in the dashboard** — all sourced:
-- H100/B200/GB200/GB300 hardware specs: [NVIDIA dgxc-benchmarking reference architectures](https://github.com/NVIDIA/dgxc-benchmarking#reference-infrastructure)
-- DGX H100 AllReduce (450 GB/s), DGX A100 AllReduce (150 GB/s): [NVIDIA NVSwitch 3rd Gen Blog](https://developer.nvidia.com/blog/?p=53977)
+**Reference numbers — primary source for DGXC architectures:**
+- H100 NCCL AllReduce (159.15 GB/s avg, 480 GB/s peak): [NVIDIA dgxc-benchmarking nccl/README.md](https://github.com/NVIDIA/dgxc-benchmarking/blob/main/nccl/README.md)
+- H100/B200/GB200/GB300 hardware specs + peak TFLOPS: [NVIDIA dgxc-benchmarking reference architectures](https://github.com/NVIDIA/dgxc-benchmarking#reference-infrastructure)
+
+**Supplementary sources for non-DGXC architectures:**
+- DGX A100 AllReduce (~150 GB/s): [NVIDIA NVSwitch 3rd Gen Blog](https://developer.nvidia.com/blog/?p=53977)
 - PCIe bandwidth tiers (P2P ~12 GB/s, CPU-routed ~8 GB/s): [NVIDIA nccl-tests PERFORMANCE.md](https://github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md)
 - DGX Spark GB10 (~23 GB/s): [NVIDIA DGX Spark Playbooks](https://github.com/NVIDIA/dgx-spark-playbooks/blob/main/nvidia/connect-two-sparks/assets/performance_benchmarking_guide.md)
-- Multi-node InfiniBand numbers: [Azure HPC Blog](https://techcommunity.microsoft.com/blog/azurehighperformancecomputingblog/performance-at-scale-the-role-of-interconnects-in-azure-hpc--ai-infrastructure/4427238), [Oracle Cloud Blog](https://blogs.oracle.com/cloud-infrastructure/zettascale-osu-nccl-benchmark-h100-ai-workloads)
+- Multi-node InfiniBand numbers: [Azure HPC Blog](https://techcommunity.microsoft.com/blog/azurehighperformancecomputingblog/performance-at-scale-the-role-of-interconnects-in-azure-hpc--ai-infrastructure/4427238)
 
 **NCCL best practices:** This tool follows NVIDIA's recommendation to let NCCL auto-detect topology and optimal settings. See [NCCL Environment Variables](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html).
 

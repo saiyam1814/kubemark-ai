@@ -19,58 +19,78 @@ const COLORS = {
 const COLOR_LIST = Object.values(COLORS);
 
 // GPU hardware specs and published benchmark references
-// Sources cited inline — all numbers from official NVIDIA docs or verified community reports
 //
-// NVIDIA DGX Cloud Benchmarking (github.com/NVIDIA/dgxc-benchmarking) supports:
-//   H100, B200, GB200, GB300 only
-// kubemark-ai extends to any NVIDIA GPU via portable NCCL binaries and GPT-2 training
+// PRIMARY SOURCE for H100, B200, GB200, GB300:
+//   github.com/NVIDIA/dgxc-benchmarking — NVIDIA's official benchmark suite
+//   Reference infrastructure specs: github.com/NVIDIA/dgxc-benchmarking#reference-infrastructure
+//   NCCL sample output (H100): github.com/NVIDIA/dgxc-benchmarking/blob/main/nccl/README.md
+//   Peak TFLOPS: published in llama3.1/README.md, nemotron4-340b/README.md
+//
+// SUPPLEMENTARY sources for non-DGXC architectures cited inline
 const GPU_SPECS = {
   // --- NVIDIA DGXC Benchmarking supported architectures ---
-  // Specs from: github.com/NVIDIA/dgxc-benchmarking#reference-infrastructure
+  // All specs from: github.com/NVIDIA/dgxc-benchmarking#reference-infrastructure
   h100: {
-    nvlinkBw: 900,        // NVLink 4.0: 900 GB/s bidirectional per GPU
+    nvlinkBw: 900,        // NVLink 4.0: 900 GB/s bidirectional per GPU (18 links)
     memBw: 3200,           // HBM3: 3.2 TB/s
+    peakTflops: { bf16: 989, fp8: 1979 },
     interconnect: 'NVLink 4.0',
     gpusPerNode: 8,
     dgxcSupported: true,
-    // Published AllReduce: ~450 GB/s (DGX H100 with NVSwitch+NVLS)
-    // Source: developer.nvidia.com/blog/?p=53977
-    publishedAllReduce: 450,
-    publishedSource: 'NVIDIA NVSwitch 3rd Gen Blog',
+    // NVIDIA dgxc-benchmarking sample output (8xH100 AllReduce):
+    //   avg busbw = 159.15 GB/s, peak busbw = 479.99 GB/s (at 16GB message)
+    // Source: github.com/NVIDIA/dgxc-benchmarking/blob/main/nccl/README.md
+    publishedAllReduce: 159.15,
+    publishedAllReducePeak: 480,
+    publishedSource: 'NVIDIA dgxc-benchmarking sample (8xH100)',
+    publishedSourceUrl: 'https://github.com/NVIDIA/dgxc-benchmarking/blob/main/nccl/README.md',
   },
   b200: {
-    nvlinkBw: 1800,       // NVLink 5.0: 1.8 TB/s per GPU
+    nvlinkBw: 1800,       // NVLink 5.0: 1.8 TB/s per GPU (18 links)
     memBw: 8000,           // HBM3e: 8 TB/s
+    peakTflops: { bf16: 2250, fp8: 4500 },
     interconnect: 'NVLink 5.0',
     gpusPerNode: 8,
     dgxcSupported: true,
+    // No published NCCL numbers in dgxc-benchmarking repo for B200
+    publishedSource: 'NVIDIA dgxc-benchmarking (hardware specs only)',
+    publishedSourceUrl: 'https://github.com/NVIDIA/dgxc-benchmarking#reference-infrastructure',
   },
   gb200: {
     nvlinkBw: 1800,       // NVLink 5.0: 1.8 TB/s per GPU
     memBw: 8000,           // HBM3e: 8 TB/s (16 TB/s total system)
+    peakTflops: { bf16: 2450, fp8: 4900 },
     interconnect: 'NVLink 5.0',
-    gpusPerNode: 4,
+    gpusPerNode: 4,        // 4 tasks per node (2 superchips x 2 GPUs)
     dgxcSupported: true,
+    // No published NCCL numbers in dgxc-benchmarking repo for GB200
+    publishedSource: 'NVIDIA dgxc-benchmarking (hardware specs only)',
+    publishedSourceUrl: 'https://github.com/NVIDIA/dgxc-benchmarking#reference-infrastructure',
   },
   gb300: {
     nvlinkBw: 1800,       // NVLink 5.0: 1.8 TB/s per GPU
     memBw: 12000,          // HBM3e: 12 TB/s per GPU
+    peakTflops: { bf16: 2450, fp8: 4900 },
     interconnect: 'NVLink 5.0',
     gpusPerNode: 4,
     dgxcSupported: true,
+    // No published NCCL numbers in dgxc-benchmarking repo for GB300
+    publishedSource: 'NVIDIA dgxc-benchmarking (hardware specs only)',
+    publishedSourceUrl: 'https://github.com/NVIDIA/dgxc-benchmarking#reference-infrastructure',
   },
 
   // --- Community-verified architectures (not in NVIDIA DGXC suite) ---
   a100: {
     nvlinkBw: 600,        // NVLink 3.0: 600 GB/s bidirectional per GPU
     memBw: 2039,           // HBM2e: 2 TB/s
+    peakTflops: { bf16: 312, fp8: null },
     interconnect: 'NVLink 3.0',
     gpusPerNode: 8,
     dgxcSupported: false,
-    // Published AllReduce: ~150 GB/s (DGX A100), ~200 GB/s (community 8-GPU)
-    // Sources: developer.nvidia.com/blog/?p=53977, github.com/NVIDIA/nccl-tests/issues/149
+    // Community sources: ~226 GB/s (nccl-tests #149), ~150 GB/s (DGX A100 NVSwitch Blog)
     publishedAllReduce: 150,
     publishedSource: 'NVIDIA NVSwitch 3rd Gen Blog (DGX A100)',
+    publishedSourceUrl: 'https://developer.nvidia.com/blog/?p=53977',
   },
 };
 
@@ -212,21 +232,27 @@ function renderNCCLRun() {
     ratingEl.className = 'rating-box rating-good';
     ratingEl.innerHTML = `<div class="rating-label">Single-GPU Test</div><div>This measures <strong>internal GPU memory bandwidth</strong> (${maxBw.toFixed(1)} GB/s), not inter-GPU communication. ${spec ? `The ${run.gpu_type.toUpperCase()} has ${spec.memBw} GB/s theoretical memory bandwidth.` : ''} For GPU-to-GPU benchmarks, use 2+ GPUs. <em>Source: <a href="https://github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md" target="_blank">NCCL Performance Doc</a></em></div>`;
   } else if (spec && spec.dgxcSupported) {
-    // NVIDIA DGXC-supported GPU with published reference
-    const refNote = spec.publishedAllReduce
-      ? `NVIDIA published AllReduce reference: <strong>${spec.publishedAllReduce} GB/s</strong> (${spec.publishedSource}).`
-      : `Hardware NVLink spec: ${spec.nvlinkBw} GB/s per GPU.`;
-    const pct = spec.publishedAllReduce ? ((maxBw / spec.publishedAllReduce) * 100).toFixed(0) : null;
-    const pctNote = pct ? ` Your peak (${maxBw.toFixed(1)} GB/s) is <strong>${pct}%</strong> of reference.` : '';
+    // NVIDIA DGXC-supported GPU — use dgxc-benchmarking as primary source
+    const sourceUrl = spec.publishedSourceUrl || 'https://github.com/NVIDIA/dgxc-benchmarking';
+    let refNote;
+    if (spec.publishedAllReduce) {
+      refNote = `NVIDIA dgxc-benchmarking published AllReduce: <strong>${spec.publishedAllReduce} GB/s avg</strong>, <strong>${spec.publishedAllReducePeak} GB/s peak</strong> (<a href="${sourceUrl}" target="_blank">${spec.publishedSource}</a>).`;
+      const pct = ((maxBw / spec.publishedAllReducePeak) * 100).toFixed(0);
+      refNote += ` Your peak (${maxBw.toFixed(1)} GB/s) is <strong>${pct}%</strong> of published peak.`;
+    } else {
+      refNote = `Hardware NVLink spec: ${spec.nvlinkBw} GB/s per GPU. No published NCCL benchmark numbers in <a href="${sourceUrl}" target="_blank">dgxc-benchmarking</a> for this GPU yet.`;
+    }
+    const tfNote = spec.peakTflops ? ` Peak theoretical: ${spec.peakTflops.bf16} TFLOPS (BF16), ${spec.peakTflops.fp8} TFLOPS (FP8).` : '';
     ratingEl.className = 'rating-box rating-good';
-    ratingEl.innerHTML = `<div class="rating-label">NVIDIA DGXC Supported Architecture</div><div>The ${run.gpu_type.toUpperCase()} is in <a href="https://github.com/NVIDIA/dgxc-benchmarking" target="_blank">NVIDIA's benchmark suite</a>. ${refNote}${pctNote} Result: ${maxBw.toFixed(1)} GB/s peak across ${run.total_gpus} GPUs (${run.num_nodes} nodes).</div>`;
+    ratingEl.innerHTML = `<div class="rating-label">NVIDIA DGXC Supported Architecture</div><div>The ${run.gpu_type.toUpperCase()} is in <a href="https://github.com/NVIDIA/dgxc-benchmarking" target="_blank">NVIDIA's DGX Cloud Benchmarking suite</a>. ${refNote}${tfNote} Result: ${maxBw.toFixed(1)} GB/s peak across ${run.total_gpus} GPUs (${run.num_nodes} nodes).</div>`;
   } else if (spec && !spec.dgxcSupported) {
     // Known GPU with specs but not in DGXC (e.g., A100)
+    const sourceUrl = spec.publishedSourceUrl || 'https://github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md';
     const refNote = spec.publishedAllReduce
-      ? `Community-verified AllReduce: ~${spec.publishedAllReduce} GB/s (${spec.publishedSource}).`
+      ? `Community-verified AllReduce: ~${spec.publishedAllReduce} GB/s (<a href="${sourceUrl}" target="_blank">${spec.publishedSource}</a>).`
       : '';
     ratingEl.className = 'rating-box';
-    ratingEl.innerHTML = `<div class="rating-label">Community-Verified Architecture</div><div>The ${run.gpu_type.toUpperCase()} is not in NVIDIA's DGXC benchmark suite but is well-documented in the community. ${refNote} Your peak: ${maxBw.toFixed(1)} GB/s across ${run.total_gpus} GPUs (${run.num_nodes} nodes). <em>See <a href="https://github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md" target="_blank">NCCL Performance Doc</a> for expected ranges by interconnect type.</em></div>`;
+    ratingEl.innerHTML = `<div class="rating-label">Community-Verified Architecture</div><div>The ${run.gpu_type.toUpperCase()} is not in <a href="https://github.com/NVIDIA/dgxc-benchmarking" target="_blank">NVIDIA's DGXC benchmark suite</a> (which covers H100, B200, GB200, GB300) but is well-documented in the community. ${refNote} Your peak: ${maxBw.toFixed(1)} GB/s across ${run.total_gpus} GPUs (${run.num_nodes} nodes). <em>See <a href="https://github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md" target="_blank">NCCL Performance Doc</a> for expected ranges by interconnect type.</em></div>`;
   } else if (run.total_gpus > 1) {
     // Unknown GPU type — show interconnect tier guidance
     ratingEl.className = 'rating-box';

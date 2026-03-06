@@ -68,14 +68,16 @@
           <table>
             <thead><tr><th>GPU Config</th><th>Interconnect</th><th>Reported Bandwidth</th><th>Source</th></tr></thead>
             <tbody>
-              <tr style="border-bottom:1px solid var(--border);"><td colspan="4" style="color:var(--accent);font-weight:600;padding-top:8px;">NVLink Tier (intra-node, DGX/HGX systems)</td></tr>
-              <tr><td>DGX H100 x8</td><td>NVLink 4.0 + NVSwitch</td><td><strong>~450 GB/s</strong></td><td><a href="https://developer.nvidia.com/blog/?p=53977" target="_blank">NVIDIA NVSwitch 3rd Gen Blog</a></td></tr>
-              <tr><td>H100 SXM x8 (sample)</td><td>NVLink 4.0</td><td>~274 GB/s busbw</td><td><a href="https://github.com/NVIDIA/dgxc-benchmarking/blob/main/nccl/README.md" target="_blank">NVIDIA dgxc-benchmarking sample</a></td></tr>
-              <tr><td>DGX A100 x8</td><td>NVLink 3.0 + NVSwitch</td><td><strong>~150 GB/s</strong></td><td><a href="https://developer.nvidia.com/blog/?p=53977" target="_blank">NVIDIA NVSwitch 3rd Gen Blog</a></td></tr>
+              <tr style="border-bottom:1px solid var(--border);"><td colspan="4" style="color:var(--accent);font-weight:600;padding-top:8px;">NVIDIA DGXC Benchmarking (H100, B200, GB200, GB300)</td></tr>
+              <tr><td>H100 SXM x8</td><td>NVLink 4.0 (900 GB/s/GPU)</td><td><strong>159.15 GB/s avg</strong>, 480 GB/s peak</td><td><a href="https://github.com/NVIDIA/dgxc-benchmarking/blob/main/nccl/README.md" target="_blank">NVIDIA dgxc-benchmarking (sample output)</a></td></tr>
+              <tr><td>B200 x8</td><td>NVLink 5.0 (1.8 TB/s/GPU)</td><td>No published NCCL numbers yet</td><td><a href="https://github.com/NVIDIA/dgxc-benchmarking#reference-infrastructure" target="_blank">NVIDIA dgxc-benchmarking (hardware specs)</a></td></tr>
+              <tr><td>GB200 (4 tasks/node)</td><td>NVLink 5.0 (1.8 TB/s/GPU)</td><td>No published NCCL numbers yet</td><td><a href="https://github.com/NVIDIA/dgxc-benchmarking#reference-infrastructure" target="_blank">NVIDIA dgxc-benchmarking (hardware specs)</a></td></tr>
+              <tr><td>GB300 (4 tasks/node)</td><td>NVLink 5.0 (1.8 TB/s/GPU)</td><td>No published NCCL numbers yet</td><td><a href="https://github.com/NVIDIA/dgxc-benchmarking#reference-infrastructure" target="_blank">NVIDIA dgxc-benchmarking (hardware specs)</a></td></tr>
+              <tr style="border-bottom:1px solid var(--border);"><td colspan="4" style="color:var(--accent);font-weight:600;padding-top:8px;">Community &amp; Supplementary Sources</td></tr>
+              <tr><td>DGX A100 x8</td><td>NVLink 3.0 + NVSwitch</td><td>~150 GB/s</td><td><a href="https://developer.nvidia.com/blog/?p=53977" target="_blank">NVIDIA NVSwitch 3rd Gen Blog</a></td></tr>
               <tr><td>A100 SXM4 x8</td><td>NVLink 3.0</td><td>~226 GB/s busbw</td><td><a href="https://github.com/NVIDIA/nccl-tests/issues/149" target="_blank">nccl-tests #149</a></td></tr>
-              <tr style="border-bottom:1px solid var(--border);"><td colspan="4" style="color:var(--accent);font-weight:600;padding-top:8px;">InfiniBand Tier (multi-node)</td></tr>
-              <tr><td>H100 x16 (2 nodes)</td><td>400Gb/s InfiniBand</td><td>~461 GB/s</td><td><a href="https://techcommunity.microsoft.com/blog/azurehighperformancecomputingblog/performance-at-scale-the-role-of-interconnects-in-azure-hpc--ai-infrastructure/4427238" target="_blank">Azure HPC Blog</a>, <a href="https://blogs.oracle.com/cloud-infrastructure/zettascale-osu-nccl-benchmark-h100-ai-workloads" target="_blank">Oracle Cloud</a></td></tr>
-              <tr><td>A100 x16 (2 nodes)</td><td>200Gb/s InfiniBand</td><td>~186-190 GB/s</td><td><a href="https://techcommunity.microsoft.com/blog/azurehighperformancecomputingblog/performance-considerations-for-large-scale-deep-learning-training-on-azure-ndv4-/2693834" target="_blank">Azure NDv4 Blog</a>, <a href="https://blogs.oracle.com/cloud-infrastructure/post/accelerate-distributed-deep-learning-with-oci" target="_blank">Oracle Cloud</a></td></tr>
+              <tr><td>H100 x16 (2 nodes)</td><td>400Gb/s InfiniBand</td><td>~461 GB/s</td><td><a href="https://techcommunity.microsoft.com/blog/azurehighperformancecomputingblog/performance-at-scale-the-role-of-interconnects-in-azure-hpc--ai-infrastructure/4427238" target="_blank">Azure HPC Blog</a></td></tr>
+              <tr><td>A100 x16 (2 nodes)</td><td>200Gb/s InfiniBand</td><td>~186-190 GB/s</td><td><a href="https://techcommunity.microsoft.com/blog/azurehighperformancecomputingblog/performance-considerations-for-large-scale-deep-learning-training-on-azure-ndv4-/2693834" target="_blank">Azure NDv4 Blog</a></td></tr>
               <tr style="border-bottom:1px solid var(--border);"><td colspan="4" style="color:var(--accent);font-weight:600;padding-top:8px;">PCIe Tier (no NVLink)</td></tr>
               <tr><td>L40S x4 (1 node)</td><td>PCIe Gen4 P2P</td><td>~22 GB/s</td><td><a href="https://github.com/NVIDIA/nccl/issues/1202" target="_blank">nccl #1202</a></td></tr>
               <tr><td>Any GPU (PCIe P2P direct)</td><td>PCIe P2P</td><td>~12 GB/s</td><td><a href="https://github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md" target="_blank">NVIDIA nccl-tests PERFORMANCE.md</a></td></tr>
@@ -86,10 +88,12 @@
             </tbody>
           </table>
           <p style="margin-top:8px;font-size:0.8em;color:var(--text-dim);">
-            <strong>Architecture support:</strong>
-            <a href="https://github.com/NVIDIA/dgxc-benchmarking" target="_blank" style="color:var(--accent);">NVIDIA DGX Cloud Benchmarking</a> provides validated recipes for <strong>H100, B200, GB200, GB300</strong>.
-            kubemark-ai extends this to any NVIDIA GPU using the same underlying NCCL binaries and a portable GPT-2 training benchmark.
-            Hardware NVLink specs: H100 = 900 GB/s/GPU, B200/GB200 = 1.8 TB/s/GPU (<a href="https://github.com/NVIDIA/dgxc-benchmarking#reference-infrastructure" target="_blank" style="color:var(--accent);">source</a>).
+            <strong>Primary source:</strong>
+            <a href="https://github.com/NVIDIA/dgxc-benchmarking" target="_blank" style="color:var(--accent);">NVIDIA DGX Cloud Benchmarking</a> provides validated recipes and reference infrastructure for <strong>H100, B200, GB200, GB300</strong>.
+            The H100 sample output (159.15 GB/s avg busbw) is from NVIDIA's own repo. B200/GB200/GB300 have hardware specs published but no NCCL benchmark numbers yet.
+            Peak theoretical TFLOPS: H100 = 989 (BF16) / 1,979 (FP8), B200 = 2,250 / 4,500, GB200/GB300 = 2,450 / 4,900
+            (<a href="https://github.com/NVIDIA/dgxc-benchmarking#reference-infrastructure" target="_blank" style="color:var(--accent);">source</a>).
+            Community sources are clearly labeled and link to original publications.
           </p>
         </div>
       </div>
