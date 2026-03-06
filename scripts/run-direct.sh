@@ -196,7 +196,11 @@ echo ""
 GPU_NAME=$($RUNTIME run --rm --gpus all nvidia/cuda:12.8.0-base-ubuntu22.04 nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | tr ' ' '-' | tr '[:upper:]' '[:lower:]')
 
 # Adjust max message size for GPUs with limited VRAM
-GPU_MEM_MB=$(docker run --rm --gpus all nvidia/cuda:12.8.0-base-ubuntu22.04 nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
+GPU_MEM_MB=$($RUNTIME run --rm --gpus all nvidia/cuda:12.8.0-base-ubuntu22.04 nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' []')
+# Handle non-numeric values (e.g., GB10 unified memory reports "N/A")
+if ! [[ "$GPU_MEM_MB" =~ ^[0-9]+$ ]]; then
+    GPU_MEM_MB=""
+fi
 if [[ -n "$GPU_MEM_MB" ]] && [[ "$GPU_MEM_MB" -lt 20000 ]]; then
     MAX_MSG_SIZE="4G"  # Reduced for GPUs with <20GB VRAM (e.g., T4 16GB)
     echo "Note: Reduced max message size to ${MAX_MSG_SIZE} for ${GPU_MEM_MB}MB VRAM GPU"
@@ -276,10 +280,18 @@ run_nccl_test() {
 }
 
 run_training_test() {
-  local training_image="${IMAGE:-pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel}"
+  # Detect host architecture for image selection
+  local host_arch
+  host_arch=$(uname -m)
+  local default_training_image="pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel"
+  if [[ "$host_arch" == "aarch64" || "$host_arch" == "arm64" ]]; then
+    # PyTorch official images are amd64-only; use NVIDIA NGC image for ARM64 (e.g., DGX Spark/Grace)
+    default_training_image="nvcr.io/nvidia/pytorch:25.02-py3"
+  fi
+  local training_image="${IMAGE:-$default_training_image}"
   # If the user didn't override the NCCL image, use PyTorch image for training
   if [[ "$IMAGE" == "ghcr.io/coreweave/nccl-tests:"* ]]; then
-    training_image="pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel"
+    training_image="$default_training_image"
   fi
 
   echo -e "${CYAN}>>> Running GPT-2 Training Benchmark${NC}"
