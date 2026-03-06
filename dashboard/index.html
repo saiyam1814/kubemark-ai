@@ -60,22 +60,26 @@
           </div>
           <div class="info-item">
             <strong>What's &ldquo;good&rdquo;?</strong>
-            <p>Compare your peak bandwidth to NVIDIA's published numbers for your GPU type. Within 90% of reference = excellent. 70-90% = good (check network config). Below 70% = investigate (wrong NCCL settings, no NVLink/IB, driver issues).</p>
+            <p>Run the same benchmark multiple times &mdash; consistent results mean stable infrastructure. For multi-GPU runs, compare against published community results for your GPU type (see reference table below). Single-GPU runs measure memory bandwidth, not inter-GPU communication.</p>
           </div>
         </div>
         <div class="reference-table">
-          <h4>NVIDIA Reference Baselines (AllReduce, large messages)</h4>
+          <h4>Published NCCL AllReduce Results (large messages, community-reported)</h4>
           <table>
-            <thead><tr><th>GPU Config</th><th>Interconnect</th><th>Expected Bandwidth</th></tr></thead>
+            <thead><tr><th>GPU Config</th><th>Interconnect</th><th>Reported Bandwidth</th><th>Source</th></tr></thead>
             <tbody>
-              <tr><td>H100 x8 (1 node)</td><td>NVLink 4.0</td><td>~280-310 GB/s</td></tr>
-              <tr><td>H100 x16 (2 nodes)</td><td>NVLink + InfiniBand</td><td>~240-280 GB/s</td></tr>
-              <tr><td>A100 x8 (1 node)</td><td>NVLink 3.0</td><td>~220-250 GB/s</td></tr>
-              <tr><td>L40S x2</td><td>PCIe Gen4</td><td>~20-25 GB/s</td></tr>
-              <tr><td>RTX 4000/6000</td><td>PCIe Gen4</td><td>~15-20 GB/s</td></tr>
-              <tr><td>T4 / V100 (PCIe)</td><td>PCIe Gen3</td><td>~8-12 GB/s</td></tr>
+              <tr><td>H100 x8 (DGX, 1 node)</td><td>NVLink 4.0</td><td>~274 GB/s busbw</td><td><a href="https://github.com/NVIDIA/dgxc-benchmarking/blob/main/nccl/README.md" target="_blank">NVIDIA NCCL README sample</a></td></tr>
+              <tr><td>A100 SXM4 x8 (1 node)</td><td>NVLink 3.0</td><td>~226 GB/s busbw</td><td><a href="https://github.com/NVIDIA/nccl-tests/issues/149" target="_blank">nccl-tests #149</a></td></tr>
+              <tr><td>L40S x4 (1 node)</td><td>PCIe Gen4</td><td>~22 GB/s busbw</td><td><a href="https://github.com/NVIDIA/nccl/issues/1202" target="_blank">nccl #1202</a></td></tr>
+              <tr><td>GB10 x2 (DGX Spark, 2 nodes)</td><td>200GbE</td><td>~22 GB/s (all_gather)</td><td><a href="https://forums.developer.nvidia.com/t/dgx-spark-nccl-test-10gb-s-not-200-gbps-25-gb-s/350077" target="_blank">NVIDIA Forums</a></td></tr>
             </tbody>
           </table>
+          <p style="margin-top:8px;font-size:0.8em;color:var(--text-dim);">
+            <strong>Note:</strong> NVIDIA does not publish official NCCL bandwidth baselines. The numbers above are from community reports and NVIDIA's sample outputs.
+            Hardware NVLink specs for <a href="https://github.com/NVIDIA/dgxc-benchmarking#reference-infrastructure" target="_blank" style="color:var(--accent);">DGXC-supported GPUs</a>:
+            H100 = 900 GB/s/GPU, B200/GB200 = 1.8 TB/s/GPU, GB300 = 1.8 TB/s/GPU.
+            Only H100, B200, GB200, and GB300 are in NVIDIA's benchmark suite. kubemark-ai runs on any NVIDIA GPU but reference baselines are only available for those architectures.
+          </p>
         </div>
       </div>
     </section>
@@ -149,7 +153,7 @@
   </main>
 
   <footer>
-    <p>kubemark-ai &mdash; GPU Benchmarking on Kubernetes &mdash; Wrapping <a href="https://github.com/NVIDIA/dgxc-benchmarking" style="color:var(--accent);">NVIDIA DGX Cloud Benchmarks</a> for K8s</p>
+    <p>kubemark-ai &mdash; GPU Benchmarking on Kubernetes &mdash; Based on <a href="https://github.com/NVIDIA/dgxc-benchmarking" style="color:var(--accent);">NVIDIA DGX Cloud Benchmarking</a> recipes (H100, B200, GB200, GB300). Extended to work on any NVIDIA GPU.</p>
   </footer>
 
   <script src="app.js"></script>

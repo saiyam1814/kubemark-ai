@@ -85,6 +85,8 @@ Works with any NVIDIA GPU. The `--gpu-type` flag sets GPUs-per-node automaticall
 | `h100x4`, `a100x4` | 4 | Multi-GPU cloud instances |
 | Any other | 1 (override with `--nodes`) | Custom setups |
 
+> **Note on GPU architecture support:** The original [NVIDIA DGX Cloud Benchmarking](https://github.com/NVIDIA/dgxc-benchmarking) recipes are designed and validated for **H100, B200, GB200, and GB300** — these are the only architectures in NVIDIA's benchmark suite with published reference configurations. kubemark-ai extends this to work on any NVIDIA GPU by using the same underlying NCCL binaries and a portable GPT-2 training benchmark that runs on any GPU with sufficient VRAM. For the large model training recipes (Qwen3-30B, Llama 3.1-8B), the parallelism configurations (TP, PP, EP) are taken directly from NVIDIA's recipes and are only validated for the GPU types listed in [NVIDIA's repo](https://github.com/NVIDIA/dgxc-benchmarking#available-benchmarks).
+
 ## Architecture
 
 ```
@@ -271,12 +273,19 @@ kubemark-ai/
 └── blog/                      # Blog post
 ```
 
-## Acknowledgments
+## Sources and Acknowledgments
 
-- [NVIDIA DGX Cloud Benchmarking](https://github.com/NVIDIA/dgxc-benchmarking) — the upstream benchmark recipes
-- [CoreWeave nccl-tests](https://github.com/coreweave/nccl-tests) — NCCL test container images for K8s
+- [NVIDIA DGX Cloud Benchmarking](https://github.com/NVIDIA/dgxc-benchmarking) — the upstream benchmark recipes (H100, B200, GB200, GB300)
+- [NVIDIA DGX Cloud Benchmarking Portal](https://developer.nvidia.com/dgx-cloud/benchmarking) — NVIDIA's official benchmarking program for Exemplar Clouds certification
+- [CoreWeave nccl-tests](https://github.com/coreweave/nccl-tests) — NCCL test container images for Kubernetes
 - [Kubeflow MPI Operator](https://github.com/kubeflow/mpi-operator) — MPIJob CRD for multi-node GPU jobs
 - [vCluster](https://www.vcluster.com/) — virtual clusters for benchmark isolation
+
+**Hardware specs used in the dashboard** are sourced from NVIDIA's published reference architectures in the [dgxc-benchmarking README](https://github.com/NVIDIA/dgxc-benchmarking#reference-infrastructure):
+- H100: NVLink 4.0 (900 GB/s per GPU), 3.2 TB/s memory bandwidth
+- B200: NVLink 5.0 (1.8 TB/s per GPU), 8 TB/s memory bandwidth
+- GB200: NVLink 5.0 (1.8 TB/s per GPU), 8 TB/s memory bandwidth (16 TB/s total)
+- GB300: NVLink 5.0 (1.8 TB/s per GPU), 12 TB/s memory bandwidth
 
 ## License
 
