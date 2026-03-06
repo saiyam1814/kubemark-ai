@@ -18,28 +18,22 @@ const COLORS = {
 
 const COLOR_LIST = Object.values(COLORS);
 
-// NVIDIA reference baselines for AllReduce
-// Multi-GPU: peak bus bandwidth (inter-GPU communication)
-// Single-GPU: memory bandwidth (internal GPU bandwidth — no inter-GPU communication)
-const REFERENCE_BASELINES = {
-  // Multi-GPU systems (NVLink) — bus bandwidth references
-  h100:    { peak: 300, memBw: 3350, interconnect: 'NVLink 4.0', gpusPerNode: 8 },
-  a100:    { peak: 240, memBw: 2039, interconnect: 'NVLink 3.0', gpusPerNode: 8 },
-  'a100-80g': { peak: 240, memBw: 2039, interconnect: 'NVLink 3.0', gpusPerNode: 8 },
-  b200:    { peak: 350, memBw: 8000, interconnect: 'NVLink 5.0', gpusPerNode: 8 },
-  gb200:   { peak: 350, memBw: 8000, interconnect: 'NVLink 5.0', gpusPerNode: 4 },
-  gb300:   { peak: 380, memBw: 8000, interconnect: 'NVLink 5.0', gpusPerNode: 4 },
-  // Single-GPU systems (PCIe) — memory bandwidth references
-  l40s:    { peak: 22, memBw: 864, interconnect: 'PCIe Gen4', gpusPerNode: 1 },
-  l40:     { peak: 22, memBw: 864, interconnect: 'PCIe Gen4', gpusPerNode: 1 },
-  l4:      { peak: 15, memBw: 300, interconnect: 'PCIe Gen4', gpusPerNode: 1 },
-  a10g:    { peak: 18, memBw: 600, interconnect: 'PCIe Gen4', gpusPerNode: 1 },
-  rtx4000: { peak: 18, memBw: 448, interconnect: 'PCIe Gen4', gpusPerNode: 1 },
-  rtx6000: { peak: 20, memBw: 960, interconnect: 'PCIe Gen4', gpusPerNode: 1 },
-  rtx4090: { peak: 20, memBw: 1008, interconnect: 'PCIe Gen4', gpusPerNode: 1 },
-  t4:      { peak: 10, memBw: 300, interconnect: 'PCIe Gen3', gpusPerNode: 1 },
-  v100:    { peak: 12, memBw: 900, interconnect: 'PCIe Gen3', gpusPerNode: 1 },
+// GPU spec references — sourced from official NVIDIA spec sheets
+// Only NVLink bandwidth and memory bandwidth from published hardware specs
+// These are HARDWARE SPECS, not benchmark baselines — actual NCCL performance varies
+// Source: NVIDIA DGX Cloud Benchmarking repo (github.com/NVIDIA/dgxc-benchmarking)
+// Only H100, B200, GB200, GB300 are in NVIDIA's benchmark suite
+const GPU_SPECS = {
+  // NVIDIA DGX Cloud Benchmarking supported architectures
+  // NVLink bandwidth per GPU from reference architecture specs
+  h100:  { nvlinkBw: 900, memBw: 3200, interconnect: 'NVLink 4.0', gpusPerNode: 8, dgxcSupported: true },
+  b200:  { nvlinkBw: 1800, memBw: 8000, interconnect: 'NVLink 5.0', gpusPerNode: 8, dgxcSupported: true },
+  gb200: { nvlinkBw: 1800, memBw: 8000, interconnect: 'NVLink 5.0', gpusPerNode: 4, dgxcSupported: true },
+  gb300: { nvlinkBw: 1800, memBw: 12000, interconnect: 'NVLink 5.0', gpusPerNode: 4, dgxcSupported: true },
 };
+
+// For backward compat — alias
+const REFERENCE_BASELINES = GPU_SPECS;
 
 // Chart.js global defaults
 Chart.defaults.color = '#8b8fa3';
@@ -115,7 +109,7 @@ function renderNCCLRun() {
   if (!run) return;
 
   const results = Array.isArray(run.results) ? run.results : [run.results];
-  const ref = REFERENCE_BASELINES[run.gpu_type.toLowerCase()];
+  const spec = GPU_SPECS[run.gpu_type.toLowerCase()];
 
   // Stats cards
   const statsEl = document.getElementById('nccl-stats');
@@ -125,23 +119,11 @@ function renderNCCLRun() {
     : 0;
   const avgBw = primaryResult?.avg_bus_bandwidth_gbps || 0;
 
-  // Performance rating — different logic for single-GPU vs multi-GPU
+  // Performance context — only show hardware spec comparison for supported GPUs
   const isSingleGpu = run.total_gpus <= 1;
   let pctOfRef = 0;
   let refValue = 0;
   let refLabel = '';
-
-  if (ref && !isSingleGpu && ref.peak > 0) {
-    // Multi-GPU: compare against inter-GPU bus bandwidth reference
-    refValue = ref.peak;
-    refLabel = `${ref.peak} GB/s via ${ref.interconnect}`;
-    pctOfRef = (maxBw / ref.peak) * 100;
-  } else if (ref && isSingleGpu && ref.memBw > 0) {
-    // Single-GPU: compare against memory bandwidth (algbw, not busbw)
-    refValue = ref.memBw;
-    refLabel = `${ref.memBw} GB/s memory bandwidth`;
-    pctOfRef = (maxBw / ref.memBw) * 100;
-  }
 
   statsEl.innerHTML = `
     <div class="stat-card">
@@ -165,37 +147,25 @@ function renderNCCLRun() {
       <div class="value">${maxBw.toFixed(1)} <span class="unit">GB/s</span></div>
     </div>
     <div class="stat-card">
-      <div class="label">${refValue > 0 ? 'vs Reference' : 'Tests Run'}</div>
-      <div class="value">${refValue > 0 ? pctOfRef.toFixed(0) + '<span class="unit">%</span>' : results.length}</div>
+      <div class="label">Tests Run</div>
+      <div class="value">${results.length}</div>
     </div>
   `;
 
-  // Performance rating box
+  // Info box — contextual information about the result
   const ratingEl = document.getElementById('nccl-rating');
   ratingEl.className = 'rating-box';
   ratingEl.style.display = '';
 
   if (isSingleGpu) {
-    // Single GPU — just informational, no pass/fail rating
     ratingEl.className = 'rating-box rating-good';
-    ratingEl.innerHTML = `<div class="rating-label">Single-GPU Test</div><div>This test measures <strong>internal GPU memory bandwidth</strong> (${maxBw.toFixed(1)} GB/s), not inter-GPU communication. ${ref ? `The ${run.gpu_type.toUpperCase()} has ${ref.memBw} GB/s theoretical memory bandwidth.` : ''} For real GPU-to-GPU benchmarks, use 2+ GPUs.</div>`;
-  } else if (refValue > 0 && maxBw > 0) {
-    let ratingClass, ratingLabel, ratingDesc;
-    if (pctOfRef >= 90) {
-      ratingClass = 'rating-excellent';
-      ratingLabel = 'Excellent';
-      ratingDesc = `Your peak bus bandwidth (${maxBw.toFixed(1)} GB/s) is ${pctOfRef.toFixed(0)}% of the NVIDIA reference for ${run.gpu_type.toUpperCase()} (${refLabel}). Your GPU interconnect is performing as expected.`;
-    } else if (pctOfRef >= 70) {
-      ratingClass = 'rating-good';
-      ratingLabel = 'Good';
-      ratingDesc = `Your peak bus bandwidth (${maxBw.toFixed(1)} GB/s) is ${pctOfRef.toFixed(0)}% of the NVIDIA reference for ${run.gpu_type.toUpperCase()} (${refLabel}). Performance is reasonable. Check NCCL environment variables and network configuration for potential improvements.`;
-    } else {
-      ratingClass = 'rating-investigate';
-      ratingLabel = 'Needs Investigation';
-      ratingDesc = `Your peak bus bandwidth (${maxBw.toFixed(1)} GB/s) is ${pctOfRef.toFixed(0)}% of the NVIDIA reference for ${run.gpu_type.toUpperCase()} (${refLabel}). This is below expected. Check: NCCL_IB_DISABLE setting, network driver versions, GPU topology (nvidia-smi topo -m), and that NVLink/InfiniBand is active.`;
-    }
-    ratingEl.className = `rating-box ${ratingClass}`;
-    ratingEl.innerHTML = `<div class="rating-label">${ratingLabel}</div><div>${ratingDesc}</div>`;
+    ratingEl.innerHTML = `<div class="rating-label">Single-GPU Test</div><div>This test measures <strong>internal GPU memory bandwidth</strong> (${maxBw.toFixed(1)} GB/s), not inter-GPU communication. ${spec ? `The ${run.gpu_type.toUpperCase()} has ${spec.memBw} GB/s theoretical memory bandwidth (${spec.interconnect}).` : ''} For GPU-to-GPU benchmarks, use 2+ GPUs.</div>`;
+  } else if (spec && spec.dgxcSupported) {
+    ratingEl.className = 'rating-box rating-good';
+    ratingEl.innerHTML = `<div class="rating-label">NVIDIA DGX Cloud Benchmarking Supported</div><div>The ${run.gpu_type.toUpperCase()} is supported by <a href="https://github.com/NVIDIA/dgxc-benchmarking" target="_blank">NVIDIA's benchmark suite</a>. Hardware spec: ${spec.nvlinkBw} GB/s NVLink bandwidth per GPU, ${spec.memBw} GB/s memory bandwidth. Your peak: ${maxBw.toFixed(1)} GB/s bus bandwidth across ${run.total_gpus} GPUs (${run.num_nodes} nodes).</div>`;
+  } else if (run.total_gpus > 1) {
+    ratingEl.className = 'rating-box';
+    ratingEl.innerHTML = `<div class="rating-label">Multi-GPU Result</div><div>Peak bus bandwidth: ${maxBw.toFixed(1)} GB/s across ${run.total_gpus} GPUs (${run.num_nodes} nodes). The ${run.gpu_type.toUpperCase()} is not in NVIDIA's DGX Cloud Benchmarking suite, so no official reference baseline is available. Your result reflects actual inter-node network performance.</div>`;
   } else {
     ratingEl.className = 'rating-box';
     ratingEl.style.display = 'none';
@@ -221,13 +191,12 @@ function renderNCCLRun() {
     .filter(d => d.size_bytes >= 1024)
     .map(d => formatBytes(d.size_bytes));
 
-  // Add reference baseline as a dashed horizontal line
-  if (ref && !isSingleGpu) {
-    // Multi-GPU: show inter-GPU bus bandwidth reference
+  // Add NVLink spec line for supported GPUs (hardware spec, not benchmark baseline)
+  if (spec && spec.dgxcSupported && !isSingleGpu) {
     datasets.push({
-      label: `${run.gpu_type.toUpperCase()} reference (${ref.peak} GB/s, ${ref.interconnect})`,
-      data: labels.map(() => ref.peak),
-      borderColor: '#ffffff44',
+      label: `${run.gpu_type.toUpperCase()} NVLink spec (${spec.nvlinkBw} GB/s per GPU)`,
+      data: labels.map(() => spec.nvlinkBw),
+      borderColor: '#ffffff22',
       borderDash: [8, 4],
       pointRadius: 0,
       fill: false,
