@@ -62,7 +62,7 @@ shift
 TOTAL_GPUS=""
 TESTS="all-reduce"
 RUNTIME=""
-IMAGE="ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.28.3-1-8b67957"
+IMAGE="ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.29.2-1-2276a5e"
 NCCL_DEBUG="WARN"
 
 while [[ $# -gt 0 ]]; do
@@ -195,6 +195,18 @@ echo ""
 # Detect GPU type for results
 GPU_NAME=$($RUNTIME run --rm --gpus all nvidia/cuda:12.8.0-base-ubuntu22.04 nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | tr ' ' '-' | tr '[:upper:]' '[:lower:]')
 
+# Adjust max message size for GPUs with limited VRAM
+GPU_MEM_MB=$(docker run --rm --gpus all nvidia/cuda:12.8.0-base-ubuntu22.04 nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
+if [[ -n "$GPU_MEM_MB" ]] && [[ "$GPU_MEM_MB" -lt 20000 ]]; then
+    MAX_MSG_SIZE="4G"  # Reduced for GPUs with <20GB VRAM (e.g., T4 16GB)
+    echo "Note: Reduced max message size to ${MAX_MSG_SIZE} for ${GPU_MEM_MB}MB VRAM GPU"
+elif [[ -n "$GPU_MEM_MB" ]] && [[ "$GPU_MEM_MB" -lt 32000 ]]; then
+    MAX_MSG_SIZE="8G"  # Reduced for GPUs with <32GB VRAM (e.g., L4 24GB)
+    echo "Note: Reduced max message size to ${MAX_MSG_SIZE} for ${GPU_MEM_MB}MB VRAM GPU"
+else
+    MAX_MSG_SIZE="16G"
+fi
+
 RUN_ID="direct-$(date +%Y%m%d-%H%M%S)-$(head -c 100 /dev/urandom | LC_ALL=C tr -dc 'a-z0-9' | head -c 6)"
 RESULTS_DIR="$PROJECT_DIR/results/${RUN_ID}"
 mkdir -p "$RESULTS_DIR"
@@ -211,6 +223,13 @@ get_binary() {
   esac
 }
 
+# Mount InfiniBand devices if available (for RDMA support)
+IB_DEVICE_FLAG=""
+if [[ -d /dev/infiniband ]]; then
+    IB_DEVICE_FLAG="--device=/dev/infiniband"
+    echo "InfiniBand devices detected, enabling RDMA support"
+fi
+
 run_nccl_test() {
   local test_name="$1"
   local binary=$(get_binary "$test_name")
@@ -223,9 +242,12 @@ run_nccl_test() {
 
   echo -e "${CYAN}>>> Running NCCL ${test_name}${NC}"
 
+  # Note: --shm-size is redundant when --ipc=host is set (container shares host /dev/shm)
+  # Kept for documentation purposes and compatibility with runtimes that ignore --ipc=host
   $RUNTIME run --rm \
     --gpus all \
     --ipc=host \
+    $IB_DEVICE_FLAG \
     --ulimit memlock=-1 \
     --ulimit stack=67108864 \
     --shm-size=32g \
@@ -238,11 +260,11 @@ run_nccl_test() {
       -map-by slot \
       -x LD_LIBRARY_PATH \
       -x NCCL_DEBUG \
-      -mca pml ob1 \
       -mca btl ^openib \
+      -mca btl_tcp_if_exclude lo,docker0 \
       /opt/nccl_tests/build/${binary} \
         -b 8 \
-        -e 16G \
+        -e $MAX_MSG_SIZE \
         -f 2 \
         -g 1 \
         -n 20 \

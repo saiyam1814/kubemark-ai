@@ -20,6 +20,9 @@ spec:
     Launcher:
       replicas: 1
       template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"
         spec:
           containers:
             - name: launcher
@@ -48,11 +51,10 @@ spec:
                     -bind-to none \
                     -map-by slot \
                     -x LD_LIBRARY_PATH \
-                    -x NCCL_DEBUG={{ $.Values.nccl.debug }} \
-                    -x NCCL_SOCKET_IFNAME={{ $.Values.nccl.socketIfname }} \
-                    -x NCCL_IB_DISABLE={{ $.Values.nccl.ibDisable }} \
-                    -mca pml ob1 \
+                    -x NCCL_DEBUG={{ $.Values.nccl.debug | default "WARN" }} \
+                    -x NCCL_IB_DISABLE={{ $.Values.nccl.ibDisable | default "0" }} \
                     -mca btl ^openib \
+                    -mca btl_tcp_if_exclude lo,docker0 \
                     /opt/nccl_tests/build/{{ $binary }} \
                       -b {{ $.Values.nccl.minBytes }} \
                       -e {{ $.Values.nccl.maxBytes }} \
@@ -74,6 +76,8 @@ spec:
             {{- include "kubemark-ai.labels" $ | nindent 12 }}
             benchmark: nccl
             test: {{ . }}
+          annotations:
+            sidecar.istio.io/inject: "false"
         spec:
           {{- with $.Values.nodeSelector }}
           nodeSelector:
@@ -86,6 +90,10 @@ spec:
           containers:
             - name: worker
               image: {{ $.Values.nccl.image }}
+              securityContext:
+                capabilities:
+                  add:
+                    - IPC_LOCK
               resources:
                 requests:
                   nvidia.com/gpu: {{ $gpusPerNode }}

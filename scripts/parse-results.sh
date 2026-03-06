@@ -34,13 +34,13 @@ parse_nccl_test() {
   # For multi-GPU: use in-place busbw (column 12). For single-GPU busbw=0, so use out-of-place algbw (column 7)
   local data_points
   data_points=$(awk '
-    /^#.*Avg bus bandwidth/ {
-      # Extract the avg bus bandwidth value
-      for (i=1; i<=NF; i++) {
-        if ($i ~ /^[0-9]+\.?[0-9]*$/ && $(i-1) == ":") {
-          print "AVG_BUSBW=" $i
-          break
-        }
+    /^#.*[Aa]vg.*[Bb]us.*[Bb]andwidth/ {
+      # Extract the last number on the line (most reliable)
+      match($0, /[0-9]+\.[0-9]+[[:space:]]*$/)
+      if (RSTART > 0) {
+        val = substr($0, RSTART, RLENGTH)
+        gsub(/[[:space:]]/, "", val)
+        print "AVG_BUSBW=" val
       }
       next
     }
@@ -49,16 +49,17 @@ parse_nccl_test() {
     # Data rows start with whitespace and a number (the size field)
     /^ *[0-9]/ {
       n = split($0, f)
-      if (n >= 13) {
+      if (n >= 11) {
         size = f[1]
-        # out-of-place columns
-        oop_time = f[6]
-        oop_algbw = f[7]
-        oop_busbw = f[8]
-        # in-place columns
-        ip_time = f[10]
-        ip_algbw = f[11]
-        ip_busbw = f[12]
+        if (n >= 13) {
+          # AllReduce/AllGather/ReduceScatter format (13 cols: with redop + root)
+          oop_time = f[6]; oop_algbw = f[7]; oop_busbw = f[8]
+          ip_time = f[10]; ip_algbw = f[11]; ip_busbw = f[12]
+        } else {
+          # AllToAll/SendRecv format (11 cols: no redop, no root)
+          oop_time = f[4]; oop_algbw = f[5]; oop_busbw = f[6]
+          ip_time = f[8]; ip_algbw = f[9]; ip_busbw = f[10]
+        }
         # Use in-place busbw if > 0, else fall back to out-of-place algbw
         bw = (ip_busbw + 0 > 0) ? ip_busbw : oop_algbw
         time_val = (ip_busbw + 0 > 0) ? ip_time : oop_time
@@ -102,15 +103,15 @@ parse_nccl_full_suite() {
   # Split the full suite log into individual test sections
   local tmpdir
   tmpdir=$(mktemp -d)
-  trap "rm -rf $tmpdir" EXIT
+  # Clean up tmpdir at end of function (not via trap, to avoid clobbering outer traps)
 
-  # Split on the ">>> [N/5]" markers
+  # Split on the ">>> [N/5]" markers, with fallback to NCCL binary output headers
   awk -v dir="$tmpdir" '
-    />>> \[1\/5\] AllReduce/     { file=dir"/all_reduce.log"; next }
-    />>> \[2\/5\] AllGather/     { file=dir"/all_gather.log"; next }
-    />>> \[3\/5\] ReduceScatter/ { file=dir"/reduce_scatter.log"; next }
-    />>> \[4\/5\] AllToAll/      { file=dir"/all_to_all.log"; next }
-    />>> \[5\/5\] SendRecv/      { file=dir"/send_recv.log"; next }
+    />>> \[1\/5\] AllReduce|nccl_test:.*all_reduce_perf|# NCCL.*AllReduce/     { file=dir"/all_reduce.log"; next }
+    />>> \[2\/5\] AllGather|nccl_test:.*all_gather_perf|# NCCL.*AllGather/     { file=dir"/all_gather.log"; next }
+    />>> \[3\/5\] ReduceScatter|nccl_test:.*reduce_scatter_perf|# NCCL.*ReduceScatter/ { file=dir"/reduce_scatter.log"; next }
+    />>> \[4\/5\] AllToAll|nccl_test:.*alltoall_perf|# NCCL.*AllToAll/        { file=dir"/all_to_all.log"; next }
+    />>> \[5\/5\] SendRecv|nccl_test:.*sendrecv_perf|# NCCL.*SendRecv/        { file=dir"/send_recv.log"; next }
     /^===/ { next }
     /^---/ { next }
     file { print > file }
@@ -125,7 +126,9 @@ parse_nccl_full_suite() {
   done
 
   local IFS=','
-  echo "${results[*]}"
+  local output="${results[*]}"
+  rm -rf "$tmpdir"
+  echo "$output"
 }
 
 parse_training() {

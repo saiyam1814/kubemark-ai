@@ -18,6 +18,9 @@ spec:
     Launcher:
       replicas: 1
       template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"
         spec:
           containers:
             - name: launcher
@@ -66,7 +69,7 @@ spec:
                     -x NCCL_DEBUG={{ .Values.nccl.debug }} \
                     -x NCCL_SOCKET_IFNAME={{ .Values.nccl.socketIfname }} \
                     -x HF_TOKEN \
-                    -mca pml ob1 -mca btl ^openib \
+                    -mca btl ^openib -mca btl_tcp_if_exclude lo,docker0 \
                     python3 -m megatron.core.scripts.train \
                       $MODEL_ARGS \
                       --tensor-model-parallel-size $TP \
@@ -93,6 +96,8 @@ spec:
             {{- include "kubemark-ai.labels" . | nindent 12 }}
             benchmark: training
             model: {{ .Values.benchmark.model }}
+          annotations:
+            sidecar.istio.io/inject: "false"
         spec:
           imagePullSecrets:
             - name: {{ .Values.training.ngcSecretName }}
@@ -107,6 +112,10 @@ spec:
           containers:
             - name: worker
               image: {{ .Values.training.image }}
+              securityContext:
+                capabilities:
+                  add:
+                    - IPC_LOCK
               env:
                 - name: HF_TOKEN
                   valueFrom:

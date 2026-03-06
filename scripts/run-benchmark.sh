@@ -71,7 +71,7 @@ DTYPE="bf16"
 USE_VCLUSTER=false
 CLEANUP=true
 NCCL_DEBUG="WARN"
-NCCL_SOCKET_IFNAME="eth0"
+NCCL_SOCKET_IFNAME=""  # Let NCCL auto-detect (override with --nccl-ifname)
 NCCL_IB_DISABLE="0"
 
 # Parse arguments
@@ -127,6 +127,8 @@ NAMESPACE="bench-${SHORT_ID}"
 
 # Export for envsubst
 export RUN_ID SHORT_ID NAMESPACE TOTAL_GPUS GPUS_PER_NODE NUM_NODES GPU_TYPE DTYPE
+# NCCL best practice: let NCCL auto-detect topology and optimal settings
+# Only override when needed. See: https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html
 export NCCL_DEBUG NCCL_SOCKET_IFNAME NCCL_IB_DISABLE
 
 print_banner

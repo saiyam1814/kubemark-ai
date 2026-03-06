@@ -18,22 +18,73 @@ const COLORS = {
 
 const COLOR_LIST = Object.values(COLORS);
 
-// GPU spec references — sourced from official NVIDIA spec sheets
-// Only NVLink bandwidth and memory bandwidth from published hardware specs
-// These are HARDWARE SPECS, not benchmark baselines — actual NCCL performance varies
-// Source: NVIDIA DGX Cloud Benchmarking repo (github.com/NVIDIA/dgxc-benchmarking)
-// Only H100, B200, GB200, GB300 are in NVIDIA's benchmark suite
+// GPU hardware specs and published benchmark references
+// Sources cited inline — all numbers from official NVIDIA docs or verified community reports
+//
+// NVIDIA DGX Cloud Benchmarking (github.com/NVIDIA/dgxc-benchmarking) supports:
+//   H100, B200, GB200, GB300 only
+// kubemark-ai extends to any NVIDIA GPU via portable NCCL binaries and GPT-2 training
 const GPU_SPECS = {
-  // NVIDIA DGX Cloud Benchmarking supported architectures
-  // NVLink bandwidth per GPU from reference architecture specs
-  h100:  { nvlinkBw: 900, memBw: 3200, interconnect: 'NVLink 4.0', gpusPerNode: 8, dgxcSupported: true },
-  b200:  { nvlinkBw: 1800, memBw: 8000, interconnect: 'NVLink 5.0', gpusPerNode: 8, dgxcSupported: true },
-  gb200: { nvlinkBw: 1800, memBw: 8000, interconnect: 'NVLink 5.0', gpusPerNode: 4, dgxcSupported: true },
-  gb300: { nvlinkBw: 1800, memBw: 12000, interconnect: 'NVLink 5.0', gpusPerNode: 4, dgxcSupported: true },
+  // --- NVIDIA DGXC Benchmarking supported architectures ---
+  // Specs from: github.com/NVIDIA/dgxc-benchmarking#reference-infrastructure
+  h100: {
+    nvlinkBw: 900,        // NVLink 4.0: 900 GB/s bidirectional per GPU
+    memBw: 3200,           // HBM3: 3.2 TB/s
+    interconnect: 'NVLink 4.0',
+    gpusPerNode: 8,
+    dgxcSupported: true,
+    // Published AllReduce: ~450 GB/s (DGX H100 with NVSwitch+NVLS)
+    // Source: developer.nvidia.com/blog/?p=53977
+    publishedAllReduce: 450,
+    publishedSource: 'NVIDIA NVSwitch 3rd Gen Blog',
+  },
+  b200: {
+    nvlinkBw: 1800,       // NVLink 5.0: 1.8 TB/s per GPU
+    memBw: 8000,           // HBM3e: 8 TB/s
+    interconnect: 'NVLink 5.0',
+    gpusPerNode: 8,
+    dgxcSupported: true,
+  },
+  gb200: {
+    nvlinkBw: 1800,       // NVLink 5.0: 1.8 TB/s per GPU
+    memBw: 8000,           // HBM3e: 8 TB/s (16 TB/s total system)
+    interconnect: 'NVLink 5.0',
+    gpusPerNode: 4,
+    dgxcSupported: true,
+  },
+  gb300: {
+    nvlinkBw: 1800,       // NVLink 5.0: 1.8 TB/s per GPU
+    memBw: 12000,          // HBM3e: 12 TB/s per GPU
+    interconnect: 'NVLink 5.0',
+    gpusPerNode: 4,
+    dgxcSupported: true,
+  },
+
+  // --- Community-verified architectures (not in NVIDIA DGXC suite) ---
+  a100: {
+    nvlinkBw: 600,        // NVLink 3.0: 600 GB/s bidirectional per GPU
+    memBw: 2039,           // HBM2e: 2 TB/s
+    interconnect: 'NVLink 3.0',
+    gpusPerNode: 8,
+    dgxcSupported: false,
+    // Published AllReduce: ~150 GB/s (DGX A100), ~200 GB/s (community 8-GPU)
+    // Sources: developer.nvidia.com/blog/?p=53977, github.com/NVIDIA/nccl-tests/issues/149
+    publishedAllReduce: 150,
+    publishedSource: 'NVIDIA NVSwitch 3rd Gen Blog (DGX A100)',
+  },
 };
 
-// For backward compat — alias
-const REFERENCE_BASELINES = GPU_SPECS;
+// Interconnect performance tiers (from NVIDIA nccl-tests PERFORMANCE.md)
+// Source: github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md
+const INTERCONNECT_TIERS = {
+  nvlink:    { label: 'NVLink (intra-node)', range: '150-480 GB/s', min: 150, max: 480 },
+  ib400:     { label: 'InfiniBand 400Gb/s (multi-node)', range: '185-461 GB/s', min: 185, max: 461 },
+  ib200:     { label: 'InfiniBand 200Gb/s (multi-node)', range: '150-190 GB/s', min: 150, max: 190 },
+  pcie_p2p:  { label: 'PCIe P2P (L40S, A10G, L4)', range: '8-22 GB/s', min: 8, max: 22 },
+  pcie_cpu:  { label: 'PCIe via CPU (T4, V100 PCIe)', range: '5-12 GB/s', min: 5, max: 12 },
+  ethernet:  { label: 'Ethernet (GKE, EKS)', range: '1-12 GB/s', min: 1, max: 12 },
+  dgxspark:  { label: 'DGX Spark QSFP (GB10)', range: '~23 GB/s', min: 20, max: 25 },
+};
 
 // Chart.js global defaults
 Chart.defaults.color = '#8b8fa3';
@@ -152,20 +203,34 @@ function renderNCCLRun() {
     </div>
   `;
 
-  // Info box — contextual information about the result
+  // Info box — contextual information about the result with sourced references
   const ratingEl = document.getElementById('nccl-rating');
   ratingEl.className = 'rating-box';
   ratingEl.style.display = '';
 
   if (isSingleGpu) {
     ratingEl.className = 'rating-box rating-good';
-    ratingEl.innerHTML = `<div class="rating-label">Single-GPU Test</div><div>This test measures <strong>internal GPU memory bandwidth</strong> (${maxBw.toFixed(1)} GB/s), not inter-GPU communication. ${spec ? `The ${run.gpu_type.toUpperCase()} has ${spec.memBw} GB/s theoretical memory bandwidth (${spec.interconnect}).` : ''} For GPU-to-GPU benchmarks, use 2+ GPUs.</div>`;
+    ratingEl.innerHTML = `<div class="rating-label">Single-GPU Test</div><div>This measures <strong>internal GPU memory bandwidth</strong> (${maxBw.toFixed(1)} GB/s), not inter-GPU communication. ${spec ? `The ${run.gpu_type.toUpperCase()} has ${spec.memBw} GB/s theoretical memory bandwidth.` : ''} For GPU-to-GPU benchmarks, use 2+ GPUs. <em>Source: <a href="https://github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md" target="_blank">NCCL Performance Doc</a></em></div>`;
   } else if (spec && spec.dgxcSupported) {
+    // NVIDIA DGXC-supported GPU with published reference
+    const refNote = spec.publishedAllReduce
+      ? `NVIDIA published AllReduce reference: <strong>${spec.publishedAllReduce} GB/s</strong> (${spec.publishedSource}).`
+      : `Hardware NVLink spec: ${spec.nvlinkBw} GB/s per GPU.`;
+    const pct = spec.publishedAllReduce ? ((maxBw / spec.publishedAllReduce) * 100).toFixed(0) : null;
+    const pctNote = pct ? ` Your peak (${maxBw.toFixed(1)} GB/s) is <strong>${pct}%</strong> of reference.` : '';
     ratingEl.className = 'rating-box rating-good';
-    ratingEl.innerHTML = `<div class="rating-label">NVIDIA DGX Cloud Benchmarking Supported</div><div>The ${run.gpu_type.toUpperCase()} is supported by <a href="https://github.com/NVIDIA/dgxc-benchmarking" target="_blank">NVIDIA's benchmark suite</a>. Hardware spec: ${spec.nvlinkBw} GB/s NVLink bandwidth per GPU, ${spec.memBw} GB/s memory bandwidth. Your peak: ${maxBw.toFixed(1)} GB/s bus bandwidth across ${run.total_gpus} GPUs (${run.num_nodes} nodes).</div>`;
-  } else if (run.total_gpus > 1) {
+    ratingEl.innerHTML = `<div class="rating-label">NVIDIA DGXC Supported Architecture</div><div>The ${run.gpu_type.toUpperCase()} is in <a href="https://github.com/NVIDIA/dgxc-benchmarking" target="_blank">NVIDIA's benchmark suite</a>. ${refNote}${pctNote} Result: ${maxBw.toFixed(1)} GB/s peak across ${run.total_gpus} GPUs (${run.num_nodes} nodes).</div>`;
+  } else if (spec && !spec.dgxcSupported) {
+    // Known GPU with specs but not in DGXC (e.g., A100)
+    const refNote = spec.publishedAllReduce
+      ? `Community-verified AllReduce: ~${spec.publishedAllReduce} GB/s (${spec.publishedSource}).`
+      : '';
     ratingEl.className = 'rating-box';
-    ratingEl.innerHTML = `<div class="rating-label">Multi-GPU Result</div><div>Peak bus bandwidth: ${maxBw.toFixed(1)} GB/s across ${run.total_gpus} GPUs (${run.num_nodes} nodes). The ${run.gpu_type.toUpperCase()} is not in NVIDIA's DGX Cloud Benchmarking suite, so no official reference baseline is available. Your result reflects actual inter-node network performance.</div>`;
+    ratingEl.innerHTML = `<div class="rating-label">Community-Verified Architecture</div><div>The ${run.gpu_type.toUpperCase()} is not in NVIDIA's DGXC benchmark suite but is well-documented in the community. ${refNote} Your peak: ${maxBw.toFixed(1)} GB/s across ${run.total_gpus} GPUs (${run.num_nodes} nodes). <em>See <a href="https://github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md" target="_blank">NCCL Performance Doc</a> for expected ranges by interconnect type.</em></div>`;
+  } else if (run.total_gpus > 1) {
+    // Unknown GPU type — show interconnect tier guidance
+    ratingEl.className = 'rating-box';
+    ratingEl.innerHTML = `<div class="rating-label">Multi-GPU Result</div><div>Peak bus bandwidth: ${maxBw.toFixed(1)} GB/s across ${run.total_gpus} GPUs (${run.num_nodes} nodes). Compare against interconnect tiers: NVLink = 150-480 GB/s, PCIe P2P = 8-22 GB/s, Ethernet = 1-12 GB/s. <em>Source: <a href="https://github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md" target="_blank">NCCL Performance Doc</a></em></div>`;
   } else {
     ratingEl.className = 'rating-box';
     ratingEl.style.display = 'none';

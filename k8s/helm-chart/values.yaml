@@ -30,7 +30,7 @@ gpu:
 
 nccl:
   # Container image for NCCL benchmarks
-  image: ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.28.3-1-8b67957
+  image: ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.29.2-1-2276a5e
 
   # NCCL test parameters (from NVIDIA dgxc-benchmarking testset.toml)
   minBytes: "8"

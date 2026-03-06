@@ -17,10 +17,16 @@ spec:
     Launcher:
       replicas: 1
       template:
+        metadata:
+          labels:
+            app: kubemark-ai
+            benchmark: nccl
+          annotations:
+            sidecar.istio.io/inject: "false"
         spec:
           containers:
             - name: launcher
-              image: ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.28.3-1-8b67957
+              image: ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.29.2-1-2276a5e
               env:
                 - name: OMPI_ALLOW_RUN_AS_ROOT
                   value: "1"
@@ -37,12 +43,18 @@ spec:
                   echo "  Start: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
                   echo "========================================================"
 
+                  # NCCL environment tuning:
+                  # - NCCL auto-detects topology and optimal settings in most cases
+                  # - Override via env vars on the worker pods if needed:
+                  #   NCCL_SOCKET_IFNAME: Set if NCCL picks wrong network interface
+                  #   NCCL_IB_HCA: Set to mlx5 (or specific HCA) for InfiniBand
+                  #   NCCL_NET_GDR_LEVEL: Set to SYS for GPUDirect RDMA across NUMA
+                  # - Source: https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html
                   MPI_ARGS="-np ${TOTAL_GPUS} -bind-to none -map-by slot \
                     -x LD_LIBRARY_PATH \
                     -x NCCL_DEBUG=${NCCL_DEBUG:-WARN} \
-                    -x NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-eth0} \
                     -x NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-0} \
-                    -mca pml ob1 -mca btl ^openib"
+                    -mca btl ^openib -mca btl_tcp_if_exclude lo,docker0"
 
                   NCCL_ARGS="-b 8 -e 16G -f 2 -g 1 -n 20 -w 5"
 
@@ -93,10 +105,19 @@ spec:
             benchmark: nccl
             test: full-suite
             run-id: "${RUN_ID}"
+          annotations:
+            sidecar.istio.io/inject: "false"
         spec:
           containers:
             - name: worker
-              image: ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.28.3-1-8b67957
+              image: ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.29.2-1-2276a5e
+              securityContext:
+                capabilities:
+                  add:
+                    - IPC_LOCK
+              env:
+                - name: NCCL_DEBUG
+                  value: "WARN"
               resources:
                 requests:
                   nvidia.com/gpu: ${GPUS_PER_NODE}

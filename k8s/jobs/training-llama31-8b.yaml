@@ -80,11 +80,10 @@ spec:
                     -x LD_LIBRARY_PATH \
                     -x CUDA_DEVICE_MAX_CONNECTIONS=1 \
                     -x NCCL_DEBUG=${NCCL_DEBUG:-WARN} \
-                    -x NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-eth0} \
                     -x NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-0} \
                     -x HF_TOKEN \
-                    -mca pml ob1 \
                     -mca btl ^openib \
+                    -mca btl_tcp_if_exclude lo,docker0 \
                     python3 -m megatron.core.scripts.train \
                       --model llama3 \
                       --model-size 8b \
