@@ -98,7 +98,7 @@ const GPU_SPECS = {
 // Source: github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md
 const INTERCONNECT_TIERS = {
   nvlink:    { label: 'NVLink (intra-node)', range: '150-480 GB/s', min: 150, max: 480 },
-  ib400:     { label: 'InfiniBand 400Gb/s (multi-node)', range: '185-461 GB/s', min: 185, max: 461 },
+  ib400:     { label: 'InfiniBand 400Gb/s (multi-node)', range: '354-367 GB/s', min: 354, max: 367 },
   ib200:     { label: 'InfiniBand 200Gb/s (multi-node)', range: '150-190 GB/s', min: 150, max: 190 },
   pcie_p2p:  { label: 'PCIe P2P (L40S, A10G, L4)', range: '8-22 GB/s', min: 8, max: 22 },
   pcie_cpu:  { label: 'PCIe via CPU (T4, V100 PCIe)', range: '5-12 GB/s', min: 5, max: 12 },

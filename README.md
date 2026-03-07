@@ -291,7 +291,7 @@ NCCL benchmark results vary significantly by interconnect type. Use this table t
 | Interconnect | Expected AllReduce BusBW | Source |
 |-------------|-------------------------|--------|
 | DGX A100 NVLink 3.0 | ~150 GB/s | [NVIDIA NVSwitch Blog](https://developer.nvidia.com/blog/?p=53977) |
-| 400Gb/s InfiniBand (multi-node) | ~461 GB/s | [Azure HPC Blog](https://techcommunity.microsoft.com/blog/azurehighperformancecomputingblog/performance-at-scale-the-role-of-interconnects-in-azure-hpc--ai-infrastructure/4427238) |
+| 400Gb/s InfiniBand (multi-node) | ~354-367 GB/s | [Azure HPC Blog](https://techcommunity.microsoft.com/blog/azurehighperformancecomputingblog/performance-at-scale-the-role-of-interconnects-in-azure-hpc--ai-infrastructure/4427238) |
 | PCIe Gen4 P2P (L40S, L4, A10G) | ~8-22 GB/s | [NVIDIA nccl-tests PERFORMANCE.md](https://github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md) |
 | PCIe Gen3 (T4, V100 PCIe) | ~5-12 GB/s | [NVIDIA nccl-tests PERFORMANCE.md](https://github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md) |
 | DGX Spark QSFP (GB10, 2 nodes) | ~23 GB/s | [NVIDIA DGX Spark Playbooks](https://github.com/NVIDIA/dgx-spark-playbooks/blob/main/nvidia/connect-two-sparks/assets/performance_benchmarking_guide.md) |
