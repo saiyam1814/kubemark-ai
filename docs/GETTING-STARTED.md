@@ -84,24 +84,28 @@ You run:  ./scripts/run-benchmark.sh nccl --gpus 2 --gpu-type l40s
 
 ## Step 1: Get a K8s Cluster with GPUs
 
-### Option A: DigitalOcean (Easiest — recommended for testing)
+### Option A: GKE (Tested — recommended for getting started)
 
-See [docs/cloud-guides/digitalocean.md](cloud-guides/digitalocean.md) for full walkthrough.
+See [docs/cloud-guides/gke.md](cloud-guides/gke.md) for full walkthrough with tested results.
 
 ```bash
-# Create DOKS cluster
-doctl kubernetes cluster create kubemark-test --region nyc1 --size s-2vcpu-4gb --count 1
+# Create GKE cluster
+gcloud container clusters create kubemark-test \
+  --zone us-central1-a \
+  --num-nodes 1 \
+  --machine-type e2-standard-4
 
-# Add a GPU node pool (1x H100 = $3.39/hr, or 1x L40S = $1.57/hr)
-doctl kubernetes cluster node-pool create kubemark-test \
-  --name gpu-pool \
-  --size gpu-h100x1-80gb \
-  --count 1
-
-# Install NVIDIA device plugin
-helm repo add nvdp https://nvidia.github.io/k8s-device-plugin
-helm install nvidia-device-plugin nvdp/nvidia-device-plugin --namespace kube-system
+# Add GPU node pool (L4 — tested and confirmed working)
+gcloud container node-pools create gpu-pool \
+  --cluster kubemark-test \
+  --zone us-central1-a \
+  --machine-type g2-standard-8 \
+  --accelerator type=nvidia-l4,count=1 \
+  --num-nodes 1 \
+  --spot
 ```
+
+GKE automatically installs NVIDIA drivers on GPU nodes.
 
 ### Option B: Any existing cluster with GPUs
 
@@ -386,12 +390,12 @@ kubectl logs -n bench-<run-id> <launcher-pod>
 | `b200` | 8 | DGX B200 |
 | `gb200` | 4 | DGX GB200 NVL |
 | `gb300` | 4 | DGX GB300 |
-| `l40s` | 1 | DigitalOcean, cloud single-GPU |
+| `l40s` | 1 | Cloud single-GPU instances |
 | `l40` | 1 | Cloud single-GPU |
 | `l4` | 1 | GKE, cloud single-GPU |
 | `a10g` | 1 | AWS g5 instances |
-| `rtx4000` | 1 | DigitalOcean RTX 4000 Ada |
-| `rtx6000` | 1 | DigitalOcean RTX 6000 Ada |
+| `rtx4000` | 1 | Cloud or workstation GPUs |
+| `rtx6000` | 1 | Cloud or workstation GPUs |
 | `rtx4090` | 1 | Consumer/cloud |
 | `t4` | 1 | GKE, AWS g4dn |
 | `v100` | 1 | Legacy |

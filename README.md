@@ -11,14 +11,14 @@
 
 kubemark-ai wraps [NVIDIA's dgxc-benchmarking](https://github.com/NVIDIA/dgxc-benchmarking) recipes (Slurm-only) and makes them run on:
 
-- **Any Kubernetes cluster** with GPUs (DOKS, GKE, EKS, bare metal) via MPI Operator
+- **Any Kubernetes cluster** with GPUs (GKE, EKS, bare metal) via MPI Operator
 - **Any GPU machine directly** via Docker/Podman (no K8s needed)
 - **Isolated virtual clusters** via [vCluster](https://www.vcluster.com/) with zero performance overhead
 
 **New?** See the [full Getting Started guide](docs/GETTING-STARTED.md) with step-by-step setup.
 
-### Cloud Guides
-[DigitalOcean](docs/cloud-guides/digitalocean.md) | [GKE](docs/cloud-guides/gke.md) | [EKS](docs/cloud-guides/eks.md) | [CoreWeave](docs/cloud-guides/coreweave.md) | [Lambda](docs/cloud-guides/lambda.md) | [Bare Metal](docs/cloud-guides/bare-metal.md)
+### Tested Guides
+[GKE](docs/cloud-guides/gke.md) | [DGX Spark](docs/cloud-guides/dgx-spark.md)
 
 ## Quick Start
 
@@ -86,8 +86,8 @@ Works with any NVIDIA GPU. The `--gpu-type` flag sets GPUs-per-node automaticall
 | `h100` | 8 | DGX H100, cloud 8xH100 |
 | `a100` | 8 | DGX A100, cloud 8xA100 |
 | `b200`, `gb200`, `gb300` | 4-8 | DGX Blackwell |
-| `l40s`, `l40`, `rtx6000` | 1 | DigitalOcean, cloud single-GPU |
-| `rtx4000`, `rtx4090` | 1 | DigitalOcean, consumer |
+| `l40s`, `l40`, `rtx6000` | 1 | Cloud single-GPU instances |
+| `rtx4000`, `rtx4090` | 1 | Cloud or consumer GPUs |
 | `a10g`, `l4`, `t4` | 1 | AWS, GKE |
 | `h100x4`, `a100x4` | 4 | Multi-GPU cloud instances |
 | Any other | 1 (override with `--nodes`) | Custom setups |
@@ -276,8 +276,8 @@ kubemark-ai/
 │   └── values.yaml            # vCluster config for GPU benchmarking
 ├── dashboard/                 # Static web dashboard (Chart.js)
 ├── results/                   # Benchmark results (git-ignored)
-├── docs/                      # Cloud-specific guides
-└── blog/                      # Blog post
+├── docs/                      # Guides (GKE, DGX Spark)
+└── assets/                    # Logo and images
 ```
 
 ## Understanding Your Results
