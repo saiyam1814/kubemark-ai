@@ -84,7 +84,7 @@ kubectl get nodes -o custom-columns='NAME:.metadata.name,GPUS:.status.capacity.n
 
 ```bash
 # Clone and install prerequisites
-git clone <repo> && cd kubemark-ai
+git clone https://github.com/saiyam1814/kubemark-ai.git && cd kubemark-ai
 ./scripts/install-deps.sh
 
 # Run NCCL benchmark

@@ -17,7 +17,7 @@ The fastest way to test. SSH into any GPU machine (cloud VM, bare metal, your wo
 # Requirements: Docker (or Podman) + NVIDIA Container Toolkit
 # That's it. No K8s, no helm, no kubectl.
 
-git clone <repo> && cd kubemark-ai
+git clone https://github.com/saiyam1814/kubemark-ai.git && cd kubemark-ai
 
 # Auto-detects all GPUs, runs NCCL AllReduce
 ./scripts/run-direct.sh nccl
@@ -125,7 +125,7 @@ If you see `<none>` for GPUs, you need:
 ## Step 2: Install Prerequisites
 
 ```bash
-git clone <this-repo> && cd kubemark-ai
+git clone https://github.com/saiyam1814/kubemark-ai.git && cd kubemark-ai
 
 # This checks all tools and installs MPI Operator
 ./scripts/install-deps.sh

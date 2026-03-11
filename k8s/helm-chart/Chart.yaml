@@ -4,7 +4,7 @@ description: GPU benchmarking on Kubernetes — wrapping NVIDIA DGX Cloud Benchm
 type: application
 version: 0.1.0
 appVersion: "1.0.0"
-home: https://github.com/kubemark-ai/kubemark-ai
+home: https://github.com/saiyam1814/kubemark-ai
 keywords:
   - gpu
   - benchmark
