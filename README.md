@@ -1,6 +1,13 @@
-# kubemark-ai
+<p align="center">
+  <img src="assets/logo.png" alt="kubemark-ai logo" width="120">
+</p>
 
-**GPU Benchmarking on Kubernetes (and bare metal)** — Run NVIDIA DGX Cloud Benchmarks on any infrastructure with a single command.
+<h1 align="center">kubemark-ai</h1>
+
+<p align="center">
+  <strong>GPU Benchmarking on Kubernetes (and bare metal)</strong><br>
+  Run NVIDIA DGX Cloud Benchmarks on any infrastructure with a single command.
+</p>
 
 kubemark-ai wraps [NVIDIA's dgxc-benchmarking](https://github.com/NVIDIA/dgxc-benchmarking) recipes (Slurm-only) and makes them run on:
 

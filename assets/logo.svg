@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#76b900;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#4a8500;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="grad2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00bcd4;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0097a7;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="240" fill="#0f1117" stroke="#1e2233" stroke-width="4"/>
+
+  <!-- GPU chip shape -->
+  <rect x="136" y="136" width="240" height="240" rx="24" fill="#1a1e2e" stroke="#2e3345" stroke-width="3"/>
+
+  <!-- GPU pins - top -->
+  <rect x="176" y="120" width="16" height="24" rx="3" fill="#2e3345"/>
+  <rect x="208" y="120" width="16" height="24" rx="3" fill="#2e3345"/>
+  <rect x="240" y="120" width="16" height="24" rx="3" fill="#2e3345"/>
+  <rect x="272" y="120" width="16" height="24" rx="3" fill="#2e3345"/>
+  <rect x="304" y="120" width="16" height="24" rx="3" fill="#2e3345"/>
+
+  <!-- GPU pins - bottom -->
+  <rect x="176" y="368" width="16" height="24" rx="3" fill="#2e3345"/>
+  <rect x="208" y="368" width="16" height="24" rx="3" fill="#2e3345"/>
+  <rect x="240" y="368" width="16" height="24" rx="3" fill="#2e3345"/>
+  <rect x="272" y="368" width="16" height="24" rx="3" fill="#2e3345"/>
+  <rect x="304" y="368" width="16" height="24" rx="3" fill="#2e3345"/>
+
+  <!-- GPU pins - left -->
+  <rect x="120" y="176" width="24" height="16" rx="3" fill="#2e3345"/>
+  <rect x="120" y="208" width="24" height="16" rx="3" fill="#2e3345"/>
+  <rect x="120" y="240" width="24" height="16" rx="3" fill="#2e3345"/>
+  <rect x="120" y="272" width="24" height="16" rx="3" fill="#2e3345"/>
+  <rect x="120" y="304" width="24" height="16" rx="3" fill="#2e3345"/>
+
+  <!-- GPU pins - right -->
+  <rect x="368" y="176" width="24" height="16" rx="3" fill="#2e3345"/>
+  <rect x="368" y="208" width="24" height="16" rx="3" fill="#2e3345"/>
+  <rect x="368" y="240" width="24" height="16" rx="3" fill="#2e3345"/>
+  <rect x="368" y="272" width="24" height="16" rx="3" fill="#2e3345"/>
+  <rect x="368" y="304" width="24" height="16" rx="3" fill="#2e3345"/>
+
+  <!-- Benchmark bar chart inside the chip -->
+  <!-- Bar 1 -->
+  <rect x="176" y="280" width="28" height="68" rx="4" fill="url(#grad1)" opacity="0.7"/>
+  <!-- Bar 2 -->
+  <rect x="214" y="240" width="28" height="108" rx="4" fill="url(#grad1)" opacity="0.8"/>
+  <!-- Bar 3 -->
+  <rect x="252" y="200" width="28" height="148" rx="4" fill="url(#grad1)" opacity="0.9"/>
+  <!-- Bar 4 -->
+  <rect x="290" y="180" width="28" height="168" rx="4" fill="url(#grad1)"/>
+
+  <!-- Rising trend line -->
+  <polyline points="190,276 228,236 266,196 304,176"
+            stroke="url(#grad2)" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="190" cy="276" r="5" fill="#00bcd4"/>
+  <circle cx="228" cy="236" r="5" fill="#00bcd4"/>
+  <circle cx="266" cy="196" r="5" fill="#00bcd4"/>
+  <circle cx="304" cy="176" r="5" fill="#00bcd4"/>
+
+  <!-- Arrow tip on trend line -->
+  <polygon points="310,170 304,176 308,182" fill="#00bcd4"/>
+
+  <!-- K8s wheel hint - small hexagon at top right -->
+  <polygon points="350,160 362,166 362,178 350,184 338,178 338,166"
+           fill="none" stroke="#76b900" stroke-width="2" opacity="0.5"/>
+</svg>
