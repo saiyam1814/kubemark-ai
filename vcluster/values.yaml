@@ -22,6 +22,10 @@ sync:
       enabled: true
       selector:
         all: true
+    # Expose host RuntimeClasses (gvisor, vnode, kata-*) inside the vCluster
+    # so benchmark pods can set runtimeClassName for runtime-overhead runs.
+    runtimeClasses:
+      enabled: true
     csiDrivers:
       enabled: true
     csiNodes:

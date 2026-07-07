@@ -1,0 +1,116 @@
+apiVersion: kubeflow.org/v2beta1
+kind: MPIJob
+metadata:
+  name: nccl-sr-${SHORT_ID}
+  namespace: ${NAMESPACE}
+  labels:
+    app: kubemark-ai
+    benchmark: nccl
+    test: send-recv
+    run-id: "${RUN_ID}"
+spec:
+  slotsPerWorker: ${GPUS_PER_NODE}
+  runPolicy:
+    cleanPodPolicy: Running
+    ttlSecondsAfterFinished: 600
+  mpiReplicaSpecs:
+    Launcher:
+      replicas: 1
+      template:
+        metadata:
+          labels:
+            app: kubemark-ai
+            benchmark: nccl
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          ${RUNTIME_CLASS_FIELD}
+          # Tolerate GPU taint: needed when RuntimeClass pins launcher to GPU nodes
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Exists
+              effect: NoSchedule
+          restartPolicy: OnFailure
+          containers:
+            - name: launcher
+              image: ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.30.4-1-61f74e3
+              env:
+                - name: OMPI_ALLOW_RUN_AS_ROOT
+                  value: "1"
+                - name: OMPI_ALLOW_RUN_AS_ROOT_CONFIRM
+                  value: "1"
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  echo "=== kubemark-ai NCCL SendRecv Benchmark ==="
+                  echo "GPUs: ${TOTAL_GPUS} (${NUM_NODES} nodes x ${GPUS_PER_NODE} GPUs/node)"
+                  echo "GPU Type: ${GPU_TYPE}"
+                  echo "Run ID: ${RUN_ID}"
+                  echo "Start: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                  echo "========================================"
+
+                  # SendRecv uses uint8 datatype (matches NVIDIA dgxc-benchmarking testset.toml)
+                  mpirun \
+                    --allow-run-as-root \
+                    -np ${TOTAL_GPUS} \
+                    -bind-to none \
+                    -map-by slot \
+                    -x LD_LIBRARY_PATH \
+                    -x NCCL_DEBUG=${NCCL_DEBUG:-WARN} \
+                    -x NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-0} \
+                    -mca btl ^openib \
+                    -mca btl_tcp_if_exclude lo,docker0 \
+                    /opt/nccl_tests/build/sendrecv_perf \
+                      -b 8 \
+                      -e 16G \
+                      -f 2 \
+                      -g 1 \
+                      -n 20 \
+                      -w 5 \
+                      -d uint8
+
+                  MPIRUN_RC=$?
+
+                  echo "========================================"
+                  echo "End: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                  exit ${MPIRUN_RC:-1}
+              resources:
+                requests:
+                  cpu: "1"
+                  memory: 256Mi
+    Worker:
+      replicas: ${NUM_NODES}
+      template:
+        metadata:
+          labels:
+            app: kubemark-ai
+            benchmark: nccl
+            test: send-recv
+            run-id: "${RUN_ID}"
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          ${RUNTIME_CLASS_FIELD}
+          containers:
+            - name: worker
+              image: ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.30.4-1-61f74e3
+              securityContext:
+                capabilities:
+                  add:
+                    - IPC_LOCK
+              env:
+                - name: NCCL_DEBUG
+                  value: "WARN"
+              resources:
+                requests:
+                  nvidia.com/gpu: ${GPUS_PER_NODE}
+                limits:
+                  nvidia.com/gpu: ${GPUS_PER_NODE}
+              volumeMounts:
+                - mountPath: /dev/shm
+                  name: dshm
+          volumes:
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: 32Gi

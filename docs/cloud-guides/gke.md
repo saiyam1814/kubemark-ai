@@ -117,6 +117,174 @@ Training Benchmark Summary
 
 **7.82 TFLOPS/GPU** with 0.3% step time std deviation — extremely stable.
 
+## Comparing Container Runtimes on GKE (gVisor, vNode, Kata)
+
+All commands below were validated on GKE 1.35 with NVIDIA L4 GPUs
+(`g2-standard-4`). See the [runtime benchmarking guide](../runtime-benchmarking.md)
+for methodology and result interpretation.
+
+### GKE + gVisor (GKE Sandbox)
+
+GKE ships gVisor natively — create a GPU node pool with `--sandbox type=gvisor`
+and the `gvisor` RuntimeClass appears automatically:
+
+```bash
+gcloud container node-pools create gpu-gvisor \
+  --cluster kubemark-test \
+  --zone us-central1-a \
+  --machine-type g2-standard-4 \
+  --accelerator type=nvidia-l4,count=1,gpu-driver-version=latest \
+  --num-nodes 1 \
+  --sandbox type=gvisor
+
+kubectl get runtimeclass gvisor   # registered by GKE
+```
+
+Notes:
+- GKE Sandbox requires a **dedicated node pool**; sandboxed pods are pinned to
+  it via an auto-injected `sandbox.gke.io/runtime=gvisor` nodeSelector + taint.
+- GPU support uses gVisor's nvproxy; only specific driver versions are
+  allowlisted (use `gpu-driver-version=latest`).
+
+Minimal GPU pod under gVisor:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-gvisor-test
+spec:
+  runtimeClassName: gvisor        # GKE injects the sandbox nodeSelector + toleration
+  restartPolicy: Never
+  containers:
+    - name: cuda
+      image: nvidia/cuda:12.4.1-base-ubuntu22.04
+      command: ["nvidia-smi"]
+      resources:
+        limits:
+          nvidia.com/gpu: 1
+```
+
+### GKE + vNode (vCluster / Loft)
+
+vNode installs onto **existing** node pools — no dedicated pool needed. It
+requires a [vCluster Platform](https://www.vcluster.com/docs/platform) with a
+vNode-enabled license:
+
+```bash
+helm upgrade --install vnode-runtime vnode-runtime -n vnode-runtime \
+  --repo https://charts.loft.sh --create-namespace \
+  --set "config.platform.host=https://YOUR-PLATFORM.example.com" \
+  --set "config.platform.accessKey=$PLATFORM_ACCESS_KEY" \
+  --set "daemonSet.tolerations[0].operator=Exists"
+
+kubectl get runtimeclass vnode    # registered by the DaemonSet (~30s)
+```
+
+Notes:
+- The `daemonSet.tolerations` override lets the runtime DaemonSet land on
+  GPU-tainted nodes — required, or GPU nodes never get the `vnode` handler.
+- GKE's COS nodes (kernel 6.6, containerd 2.x) meet vNode's requirements
+  (kernel 6.1+, containerd 1.7/2.0) out of the box.
+- **vCluster is not required to run workloads.** vNode is a standalone
+  containerd runtime handler; the vCluster Platform connection is only for
+  license validation by the DaemonSet. Any plain pod can then use
+  `runtimeClassName: vnode`.
+- vNode *pairs* with vCluster for multi-tenancy: the benchmarks here ran on
+  the **host cluster**; running them inside a vCluster whose workloads are
+  forced onto the `vnode` RuntimeClass is the combined isolation story
+  (`--vcluster` mode + vNode).
+
+Minimal GPU pod under vNode:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-vnode-test
+spec:
+  runtimeClassName: vnode         # no dedicated node pool, no nodeSelector needed
+  restartPolicy: Never
+  containers:
+    - name: cuda
+      image: nvidia/cuda:12.4.1-base-ubuntu22.04
+      command: ["nvidia-smi"]
+      resources:
+        limits:
+          nvidia.com/gpu: 1
+```
+
+### GKE + Kata Containers (untested)
+
+GKE has no built-in Kata support. The path is the NVIDIA GPU Operator with
+Kata Manager on an **Ubuntu node pool** (`--image-type UBUNTU_CONTAINERD`,
+COS is not supported), which deploys the `kata-qemu-nvidia-gpu` RuntimeClass
+with VFIO GPU passthrough. We have not validated this on GKE — nested
+virtualization must be available on the machine type, and all GPUs on a Kata
+node are bound to VFIO (the node stops serving `nvidia.com/gpu` to runc pods).
+See the [Kata section of the runtime guide](../runtime-benchmarking.md#kata-containers-kata-qemu-nvidia-gpu).
+
+### Run the comparison
+
+```bash
+./scripts/compare-runtimes.sh \
+  --runtimes default,gvisor,vnode \
+  --benchmarks nccl,coldstart \
+  --gpus 1 --gpu-type l4 --repeats 3
+```
+
+### Measured results (L4, GKE 1.35, 3 repeats, median)
+
+| Metric | runc (baseline) | gVisor | vNode |
+|---|---|---|---|
+| NCCL all_reduce busbw | 115.3 GB/s | 115.0 GB/s (−0.3%) | 115.3 GB/s (0.0%) |
+| CUDA init | 304.9 ms | 343.8 ms (**+38.9 ms**) | 292.3 ms (−12.6 ms, noise) |
+| First CUDA kernel | 136.4 ms | +0.9 ms | +1.7 ms |
+
+### One level deeper: GKE + vCluster + runtime
+
+The same comparison can run **inside an ephemeral vCluster** per benchmark,
+stacking control-plane isolation (vCluster) on top of runtime isolation
+(gVisor/vNode):
+
+```bash
+./scripts/compare-runtimes.sh \
+  --runtimes default,gvisor,vnode \
+  --benchmarks coldstart \
+  --gpus 1 --gpu-type l4 --repeats 3 --vcluster
+```
+
+Each run creates a fresh vCluster (`vcluster/values.yaml` syncs host
+RuntimeClasses in via `sync.fromHost.runtimeClasses`), applies the benchmark
+inside it, and tears it down. The report is tagged `"vcluster": true`.
+
+Measured (L4, GKE 1.35, cold-start medians of 3, inside vCluster):
+
+| Metric | runc | gVisor | vNode |
+|---|---|---|---|
+| CUDA init | 295.4 ms | 336.8 ms (+41.4 ms) | 291.8 ms (−3.6 ms) |
+| First CUDA kernel | 128.3 ms | +21.9 ms | −4.3 ms |
+| Sandbox startup | 1 s | 1 s | 2 s |
+
+Compare with the host-cluster table above: the gVisor/vNode deltas are the
+same within noise — **vCluster adds no measurable data-plane overhead**,
+because it virtualizes only the control plane; pods run directly on host
+nodes. NCCL inside a vCluster additionally requires installing the MPI
+Operator in the virtual cluster, so the vCluster comparison covers cold-start
+(the axis where a sync layer could plausibly add latency — it didn't).
+
+Takeaways:
+- **Steady-state bandwidth is free** on both sandboxes — single-GPU NCCL is
+  identical across all three runtimes.
+- **gVisor pays at driver init** (~+40 ms CUDA context creation) from nvproxy
+  ioctl interception. Negligible for training jobs; relevant for
+  scale-to-zero/serverless GPU pods.
+- **vNode is indistinguishable from runc** on every axis measured — expected,
+  since user namespaces add no syscall emulation to the GPU path.
+- Caveat: gVisor ran on its own node pool (GKE Sandbox requirement) while
+  runc/vNode shared a node — same machine/GPU type, different physical
+  instances.
+
 ## Clean Up
 
 ```bash

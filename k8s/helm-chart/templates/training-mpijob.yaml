@@ -22,6 +22,15 @@ spec:
           annotations:
             sidecar.istio.io/inject: "false"
         spec:
+          {{- with .Values.runtimeClassName }}
+          runtimeClassName: {{ . }}
+          {{- end }}
+          # Tolerate GPU taint: needed when RuntimeClass pins launcher to GPU nodes
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Exists
+              effect: NoSchedule
+          restartPolicy: OnFailure
           containers:
             - name: launcher
               image: {{ .Values.training.image }}
@@ -83,7 +92,10 @@ spec:
                       --overlap-grad-reduce --overlap-param-gather \
                       $FP8_FLAGS --log-interval 1
 
+                  MPIRUN_RC=$?
+
                   echo "Complete: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                  exit ${MPIRUN_RC:-1}
               resources:
                 requests:
                   cpu: "4"
@@ -99,6 +111,9 @@ spec:
           annotations:
             sidecar.istio.io/inject: "false"
         spec:
+          {{- with .Values.runtimeClassName }}
+          runtimeClassName: {{ . }}
+          {{- end }}
           imagePullSecrets:
             - name: {{ .Values.training.ngcSecretName }}
           {{- with .Values.nodeSelector }}

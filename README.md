@@ -14,6 +14,7 @@ kubemark-ai wraps [NVIDIA's dgxc-benchmarking](https://github.com/NVIDIA/dgxc-be
 - **Any Kubernetes cluster** with GPUs (GKE, EKS, bare metal) via MPI Operator
 - **Any GPU machine directly** via Docker/Podman (no K8s needed)
 - **Isolated virtual clusters** via [vCluster](https://www.vcluster.com/) with zero performance overhead
+- **Any container runtime** via RuntimeClass — benchmark and compare [gVisor, Kata Containers, and vNode](docs/runtime-benchmarking.md) GPU overhead against runc
 
 **New?** See the [full Getting Started guide](docs/GETTING-STARTED.md) with step-by-step setup.
 
@@ -36,7 +37,10 @@ kubemark-ai wraps [NVIDIA's dgxc-benchmarking](https://github.com/NVIDIA/dgxc-be
 # 3. Run the full NCCL suite (5 tests)
 ./scripts/run-benchmark.sh nccl --gpus 8 --gpu-type h100 --tests full-suite
 
-# 4. View results in the dashboard
+# 4. Compare container runtime overhead (runc vs gVisor vs Kata vs vNode)
+./scripts/compare-runtimes.sh --runtimes default,gvisor,kata-qemu-nvidia-gpu
+
+# 5. View results in the dashboard
 ```
 
 ### Option B: Directly on a GPU Machine (No K8s Needed)
@@ -76,6 +80,34 @@ python3 dashboard/server.py
 | GPT-2 | 124M (dense) | PyTorch (no credentials needed) | 1 |
 | Qwen3-30B-A3B | 30B (3B active MoE) | NeMo/Megatron-Bridge | 16 |
 | Llama 3.1-8B | 8B (dense) | NeMo/Megatron-Bridge | 8 |
+
+### Runtime Overhead Benchmarks
+
+Measure what a sandboxed container runtime costs you on GPU workloads, across
+three axes that fail independently (see [runtime benchmarking guide](docs/runtime-benchmarking.md)):
+
+| Axis | Benchmark | What sandboxes pay |
+|------|-----------|--------------------|
+| Communication | NCCL busbw under each RuntimeClass | ioctl proxying (gVisor nvproxy), virtio (Kata) |
+| Compute | GPT-2 training throughput | kernel launch overhead |
+| Cold-start | Pod scheduled → CUDA ready | sandbox/VM boot + driver init |
+
+```bash
+./scripts/compare-runtimes.sh --runtimes default,gvisor,kata-qemu-nvidia-gpu,vnode \
+  --benchmarks nccl,coldstart,training --gpus 8 --gpu-type h100
+```
+
+Outputs a per-runtime overhead report normalized against the baseline (first
+runtime listed). Any single benchmark also accepts `--runtime-class NAME`.
+
+Measured on GKE (NVIDIA L4): gVisor costs **+39 ms CUDA init** and nothing in
+steady-state NCCL bandwidth; vNode is indistinguishable from runc on all axes.
+Full numbers and setup: [runtime comparison summary](docs/runtime-comparison-summary.md)
+(all measured runs consolidated), [runtime benchmarking guide](docs/runtime-benchmarking.md#measured-results-runc-vs-gvisor-vs-vnode-on-gke),
+and [GKE guide](docs/cloud-guides/gke.md#comparing-container-runtimes-on-gke-gvisor-vnode-kata).
+Results also render in the dashboard's **Runtime Overhead** tab and on the
+[project site](https://saiyam1814.github.io/kubemark-ai/) (published from
+`site/` + `docs/benchmark-reports/` via GitHub Pages on every push to main).
 
 ### GPU Types
 
@@ -146,14 +178,20 @@ For training benchmarks, you also need:
 # Single test
 ./scripts/run-benchmark.sh nccl --gpus 8 --gpu-type h100 --tests all-reduce
 
-# Multiple tests
-./scripts/run-benchmark.sh nccl --gpus 16 --gpu-type h100 --tests all-reduce,all-gather,reduce-scatter
+# Multiple tests (all 5 available individually)
+./scripts/run-benchmark.sh nccl --gpus 16 --gpu-type h100 --tests all-reduce,all-gather,reduce-scatter,all-to-all,send-recv
 
 # Full suite (all 5 NCCL tests)
 ./scripts/run-benchmark.sh nccl --gpus 64 --gpu-type h100 --tests full-suite
 
 # With vCluster isolation
 ./scripts/run-benchmark.sh nccl --gpus 16 --gpu-type h100 --vcluster
+
+# Under a specific container runtime (gVisor, Kata, vNode, ...)
+./scripts/run-benchmark.sh nccl --gpus 8 --gpu-type h100 --runtime-class gvisor
+
+# GPU cold-start latency (sandbox creation + CUDA init)
+./scripts/run-benchmark.sh coldstart --runtime-class kata-qemu-nvidia-gpu
 
 # Keep resources after completion (for debugging)
 ./scripts/run-benchmark.sh nccl --gpus 8 --gpu-type h100 --no-cleanup
@@ -208,6 +246,12 @@ helm install my-bench ./k8s/helm-chart \
   --set gpu.totalGPUs=64 \
   --set nccl.debug=INFO \
   --set nccl.ibDisable=0
+
+# Under a sandboxed runtime
+helm install my-bench ./k8s/helm-chart \
+  --set gpu.type=h100 \
+  --set gpu.totalGPUs=8 \
+  --set runtimeClassName=gvisor
 ```
 
 ### Dashboard
@@ -258,6 +302,7 @@ This makes it ideal for multi-tenant GPU benchmarking: cloud providers can valid
 kubemark-ai/
 ├── scripts/
 │   ├── run-benchmark.sh      # Main orchestrator (Kubernetes)
+│   ├── compare-runtimes.sh   # Runtime class comparison (runc/gVisor/Kata/vNode)
 │   ├── run-direct.sh         # Direct GPU runner (Docker, no K8s)
 │   ├── install-deps.sh       # Prerequisites installer
 │   └── parse-results.sh      # Results parser (logs → JSON)
@@ -266,7 +311,10 @@ kubemark-ai/
 │   │   ├── nccl-allreduce.yaml
 │   │   ├── nccl-allgather.yaml
 │   │   ├── nccl-reducescatter.yaml
+│   │   ├── nccl-alltoall.yaml
+│   │   ├── nccl-sendrecv.yaml
 │   │   ├── nccl-full-suite.yaml
+│   │   ├── gpu-coldstart.yaml
 │   │   ├── training-gpt2-bench.yaml
 │   │   ├── training-qwen3-30b.yaml
 │   │   └── training-llama31-8b.yaml
@@ -313,9 +361,12 @@ Single-GPU runs measure internal GPU memory bandwidth, not inter-GPU communicati
 - [NVIDIA DGX Cloud Benchmarking Portal](https://developer.nvidia.com/dgx-cloud/benchmarking) — Exemplar Clouds certification program
 - [NVIDIA DGX Spark Playbooks](https://github.com/NVIDIA/dgx-spark-playbooks) — official DGX Spark performance benchmarking guide
 - [NVIDIA nccl-tests](https://github.com/NVIDIA/nccl-tests) — NCCL collective performance test suite
-- [CoreWeave nccl-tests](https://github.com/coreweave/nccl-tests) — NCCL test container images (NCCL 2.29.2, HPC-X 2.25.1)
+- [CoreWeave nccl-tests](https://github.com/coreweave/nccl-tests) — NCCL test container images (NCCL 2.30.4, HPC-X 2.26, multi-arch amd64/arm64, Blackwell support)
 - [Kubeflow MPI Operator](https://github.com/kubeflow/mpi-operator) — MPIJob CRD for multi-node GPU jobs
 - [vCluster](https://www.vcluster.com/) — virtual clusters for benchmark isolation
+- [gVisor](https://gvisor.dev/docs/user_guide/gpu/) — nvproxy GPU support for sandboxed pods
+- [Kata Containers + NVIDIA GPU Operator](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/gpu-operator-kata.html) — VM-isolated GPU pods (`kata-qemu-nvidia-gpu`)
+- [vNode](https://www.vnode.com/docs/) — user-namespace runtime isolation from LoftLabs
 
 **Reference numbers — primary source for DGXC architectures:**
 - H100 NCCL AllReduce (159.15 GB/s avg, 480 GB/s peak): [NVIDIA dgxc-benchmarking nccl/README.md](https://github.com/NVIDIA/dgxc-benchmarking/blob/main/nccl/README.md)

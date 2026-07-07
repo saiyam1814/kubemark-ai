@@ -62,7 +62,7 @@ shift
 TOTAL_GPUS=""
 TESTS="all-reduce"
 RUNTIME=""
-IMAGE="ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.29.2-1-2276a5e"
+IMAGE="ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.30.4-1-61f74e3"
 NCCL_DEBUG="WARN"
 
 while [[ $# -gt 0 ]]; do

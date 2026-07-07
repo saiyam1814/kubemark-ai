@@ -24,6 +24,15 @@ spec:
           annotations:
             sidecar.istio.io/inject: "false"
         spec:
+          {{- with $.Values.runtimeClassName }}
+          runtimeClassName: {{ . }}
+          {{- end }}
+          # Tolerate GPU taint: needed when RuntimeClass pins launcher to GPU nodes
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Exists
+              effect: NoSchedule
+          restartPolicy: OnFailure
           containers:
             - name: launcher
               image: {{ $.Values.nccl.image }}
@@ -42,8 +51,11 @@ spec:
                   echo "========================================"
 
                   {{- $binary := "all_reduce_perf" }}
+                  {{- $dtypeArgs := "" }}
                   {{- if eq . "all-gather" }}{{ $binary = "all_gather_perf" }}{{- end }}
                   {{- if eq . "reduce-scatter" }}{{ $binary = "reduce_scatter_perf" }}{{- end }}
+                  {{- if eq . "all-to-all" }}{{ $binary = "alltoall_perf" }}{{ $dtypeArgs = "-d uint8" }}{{- end }}
+                  {{- if eq . "send-recv" }}{{ $binary = "sendrecv_perf" }}{{ $dtypeArgs = "-d uint8" }}{{- end }}
 
                   mpirun \
                     --allow-run-as-root \
@@ -61,9 +73,12 @@ spec:
                       -f {{ $.Values.nccl.stepFactor }} \
                       -g 1 \
                       -n {{ $.Values.nccl.iterations }} \
-                      -w {{ $.Values.nccl.warmup }}
+                      -w {{ $.Values.nccl.warmup }} {{ $dtypeArgs }}
+
+                  MPIRUN_RC=$?
 
                   echo "End: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                  exit ${MPIRUN_RC:-1}
               resources:
                 requests:
                   cpu: "1"
@@ -79,6 +94,9 @@ spec:
           annotations:
             sidecar.istio.io/inject: "false"
         spec:
+          {{- with $.Values.runtimeClassName }}
+          runtimeClassName: {{ . }}
+          {{- end }}
           {{- with $.Values.nodeSelector }}
           nodeSelector:
             {{- toYaml . | nindent 12 }}

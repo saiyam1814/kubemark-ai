@@ -27,8 +27,23 @@ header {
   align-items: center;
   padding: 20px 32px;
   border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  background: linear-gradient(135deg, var(--surface) 0%, #1c2410 100%);
 }
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-link {
+  color: var(--text-dim);
+  font-size: 14px;
+  text-decoration: none;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+}
+.header-link:hover { color: var(--accent); }
 
 .header-content h1 {
   font-size: 24px;
@@ -290,6 +305,54 @@ main {
 .reference-table tr:last-child td {
   border-bottom: none;
 }
+
+.overview-hero {
+  background: linear-gradient(135deg, var(--surface) 0%, rgba(118, 185, 0, 0.08) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px 32px;
+  margin-bottom: 24px;
+}
+
+.overview-hero h2 {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.overview-hero p {
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.overview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.overview-table th {
+  text-align: left;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+
+.overview-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.overview-table tr:hover td { background: var(--surface-2); }
+.overview-table tr:last-child td { border-bottom: none; }
+
+.stat-card {
+  transition: border-color 0.2s;
+}
+.stat-card:hover { border-color: var(--accent); }
 
 .rating-box {
   padding: 16px 20px;

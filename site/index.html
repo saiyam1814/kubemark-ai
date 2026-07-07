@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>kubemark-ai — GPU Benchmarking on Kubernetes</title>
+  <meta name="description" content="Benchmark NCCL bandwidth, training throughput, and GPU cold-start latency on any Kubernetes cluster — across container runtimes (runc, gVisor, Kata, vNode) and vCluster isolation.">
+  <link rel="stylesheet" href="site.css">
+</head>
+<body>
+  <nav>
+    <div class="nav-inner">
+      <span class="brand">kubemark-ai</span>
+      <div class="nav-links">
+        <a href="#results">Results</a>
+        <a href="#how">How it works</a>
+        <a href="#methodology">Methodology</a>
+        <a href="https://github.com/saiyam1814/kubemark-ai" class="btn-ghost">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <h1>GPU Benchmarking on Kubernetes<br><span class="accent">any GPU · any runtime · any isolation level</span></h1>
+    <p class="lede">
+      Measure what actually matters on GPU clusters: NCCL communication bandwidth,
+      training throughput, and GPU cold-start latency — then compare the cost of
+      container runtimes (runc, gVisor, Kata, vNode) and vCluster isolation
+      on identical hardware. Built on NVIDIA DGXC benchmarking recipes.
+    </p>
+    <div class="hero-actions">
+      <a class="btn-primary" href="https://github.com/saiyam1814/kubemark-ai">Get Started</a>
+      <a class="btn-ghost" href="#results">See Measured Results</a>
+    </div>
+    <pre class="hero-cmd">./scripts/compare-runtimes.sh --runtimes default,gvisor,vnode --benchmarks nccl,coldstart --vcluster</pre>
+  </header>
+
+  <section class="findings" id="findings">
+    <div class="finding">
+      <div class="finding-value">0%</div>
+      <div class="finding-title">NCCL bandwidth cost of sandboxing</div>
+      <p>Steady-state GPU communication bandwidth is identical across runc, gVisor, and vNode. Sandbox cost is a latency phenomenon, not a throughput one.</p>
+    </div>
+    <div class="finding">
+      <div class="finding-value">+40 ms</div>
+      <div class="finding-title">gVisor CUDA init overhead</div>
+      <p>Repeatable across every run: nvproxy ioctl interception taxes driver/context init. Irrelevant for training, decisive for serverless GPU.</p>
+    </div>
+    <div class="finding">
+      <div class="finding-value">≈ runc</div>
+      <div class="finding-title">vNode on every axis</div>
+      <p>User namespaces add no syscall emulation to the GPU path — vNode measured indistinguishable from runc on bandwidth and cold-start.</p>
+    </div>
+    <div class="finding">
+      <div class="finding-value">+0 ms</div>
+      <div class="finding-title">vCluster data-plane overhead</div>
+      <p>Runtime deltas reproduce within noise inside ephemeral vClusters. Control-plane virtualization; pods run directly on host nodes.</p>
+    </div>
+  </section>
+
+  <section class="section" id="results">
+    <h2>Published Results</h2>
+    <p class="section-sub">Machine-readable reports committed to the repo — rendered live below. GKE 1.35, NVIDIA L4, medians of repeated runs.</p>
+    <div id="reports"></div>
+    <p class="section-note">
+      Full analysis: <a href="https://github.com/saiyam1814/kubemark-ai/blob/main/docs/runtime-comparison-summary.md">runtime comparison summary</a> ·
+      Raw reports: <a href="https://github.com/saiyam1814/kubemark-ai/tree/main/docs/benchmark-reports">docs/benchmark-reports</a>
+    </p>
+  </section>
+
+  <section class="section" id="how">
+    <h2>How It Works</h2>
+    <div class="grid-3">
+      <div class="card">
+        <h3>1 · Pick your axes</h3>
+        <p>NCCL collectives (all-reduce, all-gather, reduce-scatter, all-to-all, send-recv), NeMo/GPT-2 training throughput, or decomposed GPU cold-start (nvidia-smi → CUDA init → first kernel).</p>
+      </div>
+      <div class="card">
+        <h3>2 · Pick your isolation</h3>
+        <p>Any <code>RuntimeClass</code> — gVisor, Kata, vNode — via <code>--runtime-class</code>, optionally inside an ephemeral vCluster per run with <code>--vcluster</code>. One flag each.</p>
+      </div>
+      <div class="card">
+        <h3>3 · Compare</h3>
+        <p><code>compare-runtimes.sh</code> runs the matrix, aggregates medians, computes overhead vs baseline, and renders everything in a local dashboard with charts.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="methodology">
+    <h2>Methodology, Honestly</h2>
+    <div class="grid-2">
+      <div class="card">
+        <h3>What we control</h3>
+        <p>Same machine type and GPU per comparison · repeated runs with medians · warmup runs identified and excluded · exit codes propagated so failures can't masquerade as results · results parsed from raw logs kept alongside every summary.</p>
+      </div>
+      <div class="card">
+        <h3>What we tell you anyway</h3>
+        <p>Zone asymmetry between node pools · single-GPU scale limits · TCP vs RDMA path differences · which numbers are noise. Every caveat ships with the result — see the <a href="https://github.com/saiyam1814/kubemark-ai/blob/main/docs/runtime-benchmarking.md">runtime benchmarking guide</a>.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>kubemark-ai — based on <a href="https://github.com/NVIDIA/dgxc-benchmarking">NVIDIA DGX Cloud Benchmarking</a> recipes, extended to any NVIDIA GPU, any runtime, any isolation level.</p>
+  </footer>
+
+  <script src="site.js"></script>
+</body>
+</html>

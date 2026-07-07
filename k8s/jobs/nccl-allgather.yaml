@@ -24,9 +24,16 @@ spec:
           annotations:
             sidecar.istio.io/inject: "false"
         spec:
+          ${RUNTIME_CLASS_FIELD}
+          # Tolerate GPU taint: needed when RuntimeClass pins launcher to GPU nodes
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Exists
+              effect: NoSchedule
+          restartPolicy: OnFailure
           containers:
             - name: launcher
-              image: ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.29.2-1-2276a5e
+              image: ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.30.4-1-61f74e3
               env:
                 - name: OMPI_ALLOW_RUN_AS_ROOT
                   value: "1"
@@ -64,7 +71,10 @@ spec:
                       -n 20 \
                       -w 5
 
+                  MPIRUN_RC=$?
+
                   echo "End: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                  exit ${MPIRUN_RC:-1}
               resources:
                 requests:
                   cpu: "1"
@@ -81,9 +91,10 @@ spec:
           annotations:
             sidecar.istio.io/inject: "false"
         spec:
+          ${RUNTIME_CLASS_FIELD}
           containers:
             - name: worker
-              image: ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.29.2-1-2276a5e
+              image: ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.30.4-1-61f74e3
               securityContext:
                 capabilities:
                   add:

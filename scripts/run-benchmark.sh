@@ -37,15 +37,19 @@ usage() {
   echo "Benchmark types:"
   echo "  nccl       Run NCCL communication benchmarks"
   echo "  training   Run model training benchmarks"
+  echo "  coldstart  Measure GPU pod cold-start latency (sandbox + CUDA init)"
   echo ""
   echo "Options:"
   echo "  --gpus N          Total number of GPUs (default: 8)"
   echo "  --gpu-type TYPE   GPU type: h100, b200, gb200, gb300, a100 (default: h100)"
   echo "  --nodes N         Number of nodes (auto-calculated if not set)"
   echo "  --tests TESTS     Comma-separated tests (default: all-reduce)"
-  echo "                    NCCL: all-reduce, all-gather, reduce-scatter, full-suite"
+  echo "                    NCCL: all-reduce, all-gather, reduce-scatter, all-to-all,"
+  echo "                          send-recv, full-suite"
   echo "  --model MODEL     Model for training benchmarks (e.g., qwen3-30b, llama31-8b)"
   echo "  --dtype TYPE      Data type: bf16, fp8 (default: bf16)"
+  echo "  --runtime-class NAME  Kubernetes RuntimeClass for benchmark pods"
+  echo "                    (e.g., gvisor, kata-qemu-nvidia-gpu, vnode; default: cluster default/runc)"
   echo "  --vcluster        Use vCluster for isolation"
   echo "  --no-cleanup      Don't delete namespace/vcluster after completion"
   echo "  --nccl-debug LVL  NCCL debug level: WARN, INFO, TRACE (default: WARN)"
@@ -71,6 +75,7 @@ DTYPE="bf16"
 USE_VCLUSTER=false
 CLEANUP=true
 NCCL_DEBUG="WARN"
+RUNTIME_CLASS=""
 NCCL_SOCKET_IFNAME=""  # Let NCCL auto-detect (override with --nccl-ifname)
 NCCL_IB_DISABLE="0"
 
@@ -83,6 +88,7 @@ while [[ $# -gt 0 ]]; do
     --tests) TESTS="$2"; shift 2;;
     --model) MODEL="$2"; shift 2;;
     --dtype) DTYPE="$2"; shift 2;;
+    --runtime-class) RUNTIME_CLASS="$2"; shift 2;;
     --vcluster) USE_VCLUSTER=true; shift;;
     --no-cleanup) CLEANUP=false; shift;;
     --nccl-debug) NCCL_DEBUG="$2"; shift 2;;
@@ -125,8 +131,16 @@ SHORT_ID="$(head -c 100 /dev/urandom | LC_ALL=C tr -dc 'a-z0-9' | head -c 6)"
 RUN_ID="$(date +%Y%m%d-%H%M%S)-${SHORT_ID}"
 NAMESPACE="bench-${SHORT_ID}"
 
+# RuntimeClass injection: manifests contain ${RUNTIME_CLASS_FIELD} inside pod specs.
+# When no runtime class is requested it substitutes to an empty (whitespace-only) line.
+RUNTIME_CLASS_FIELD=""
+if [[ -n "$RUNTIME_CLASS" ]]; then
+  RUNTIME_CLASS_FIELD="runtimeClassName: ${RUNTIME_CLASS}"
+fi
+
 # Export for envsubst
 export RUN_ID SHORT_ID NAMESPACE TOTAL_GPUS GPUS_PER_NODE NUM_NODES GPU_TYPE DTYPE
+export RUNTIME_CLASS RUNTIME_CLASS_FIELD
 # NCCL best practice: let NCCL auto-detect topology and optimal settings
 # Only override when needed. See: https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html
 export NCCL_DEBUG NCCL_SOCKET_IFNAME NCCL_IB_DISABLE
@@ -139,28 +153,40 @@ echo "  GPUs:       $TOTAL_GPUS ($NUM_NODES nodes x $GPUS_PER_NODE GPUs/node)"
 echo "  GPU Type:   $GPU_TYPE"
 if [[ "$BENCHMARK_TYPE" == "nccl" ]]; then
   echo "  Tests:      $TESTS"
-else
+elif [[ "$BENCHMARK_TYPE" == "training" ]]; then
   echo "  Model:      $MODEL"
   echo "  Dtype:      $DTYPE"
 fi
+echo "  Runtime:    ${RUNTIME_CLASS:-default (runc)}"
 echo "  vCluster:   $USE_VCLUSTER"
 echo "  Namespace:  $NAMESPACE"
 echo "  Run ID:     $RUN_ID"
 echo ""
 
 # Cleanup handler
+# HOST_NAMESPACE/ORIG_KUBECONFIG are captured before vCluster mode redirects
+# KUBECONFIG into the virtual cluster and repoints NAMESPACE at 'default' —
+# cleanup must always target the HOST cluster or the vCluster leaks.
+HOST_NAMESPACE="$NAMESPACE"
+ORIG_KUBECONFIG="${KUBECONFIG:-}"
 cleanup() {
   if [[ "$CLEANUP" == "true" ]]; then
     echo ""
     echo -e "${YELLOW}Cleaning up...${NC}"
-    if [[ "$USE_VCLUSTER" == "true" ]]; then
-      vcluster delete "bench-${SHORT_ID}" --namespace "$NAMESPACE" --driver helm 2>/dev/null || true
+    # Restore host-cluster kubeconfig (vCluster mode overrides it)
+    if [[ -n "$ORIG_KUBECONFIG" ]]; then
+      export KUBECONFIG="$ORIG_KUBECONFIG"
+    else
+      unset KUBECONFIG
     fi
-    kubectl delete namespace "$NAMESPACE" --wait=false 2>/dev/null || true
+    if [[ "$USE_VCLUSTER" == "true" ]]; then
+      vcluster delete "bench-${SHORT_ID}" --namespace "$HOST_NAMESPACE" --driver helm 2>/dev/null || true
+    fi
+    kubectl delete namespace "$HOST_NAMESPACE" --wait=false 2>/dev/null || true
     echo -e "${GREEN}Cleanup complete${NC}"
   else
     echo ""
-    echo -e "${YELLOW}Skipping cleanup (--no-cleanup). Resources in namespace: $NAMESPACE${NC}"
+    echo -e "${YELLOW}Skipping cleanup (--no-cleanup). Resources in namespace: $HOST_NAMESPACE${NC}"
   fi
 }
 trap cleanup EXIT
@@ -209,6 +235,8 @@ map_test_to_manifest() {
     all-reduce)      echo "nccl-allreduce";;
     all-gather)      echo "nccl-allgather";;
     reduce-scatter)  echo "nccl-reducescatter";;
+    all-to-all)      echo "nccl-alltoall";;
+    send-recv)       echo "nccl-sendrecv";;
     full-suite)      echo "nccl-full-suite";;
     *)               echo "nccl-$1";;
   esac
@@ -221,12 +249,18 @@ case "$BENCHMARK_TYPE" in
       MANIFEST="$PROJECT_DIR/k8s/jobs/${MANIFEST_NAME}.yaml"
       if [[ ! -f "$MANIFEST" ]]; then
         echo -e "${RED}  Manifest not found: $MANIFEST${NC}"
-        echo "  Available: all-reduce, all-gather, reduce-scatter, full-suite"
+        echo "  Available: all-reduce, all-gather, reduce-scatter, all-to-all, send-recv, full-suite"
         exit 1
       fi
       echo "  Applying: ${MANIFEST_NAME}"
       envsubst < "$MANIFEST" | kubectl apply -f -
     done
+    ;;
+
+  coldstart)
+    MANIFEST="$PROJECT_DIR/k8s/jobs/gpu-coldstart.yaml"
+    echo "  Applying: gpu-coldstart"
+    envsubst < "$MANIFEST" | kubectl apply -f -
     ;;
 
   training)
@@ -304,6 +338,8 @@ mkdir -p "$RESULTS_DIR"
 # Get pod logs (launcher pods for MPIJob, all pods for Job)
 if [[ "$BENCHMARK_TYPE" == "nccl" ]]; then
   LOG_SELECTOR="training.kubeflow.org/job-role=launcher"
+elif [[ "$BENCHMARK_TYPE" == "coldstart" ]]; then
+  LOG_SELECTOR="app=kubemark-ai,benchmark=coldstart"
 else
   LOG_SELECTOR="app=kubemark-ai,benchmark=training"
 fi
@@ -313,9 +349,19 @@ for pod in $(kubectl get pods -n "$NAMESPACE" -l "$LOG_SELECTOR" -o name 2>/dev/
   kubectl logs -n "$NAMESPACE" "$pod" > "$RESULTS_DIR/${POD_NAME}.log" 2>&1
 done
 
+# For cold-start runs, capture pod lifecycle timestamps from the API server.
+# These measure sandbox creation overhead, which container logs cannot see.
+if [[ "$BENCHMARK_TYPE" == "coldstart" ]]; then
+  for pod in $(kubectl get pods -n "$NAMESPACE" -l "$LOG_SELECTOR" -o name 2>/dev/null); do
+    POD_NAME=$(basename "$pod")
+    kubectl get -n "$NAMESPACE" "$pod" -o jsonpath='POD_TIMESTAMPS created={.metadata.creationTimestamp} scheduled={.status.conditions[?(@.type=="PodScheduled")].lastTransitionTime} started={.status.containerStatuses[0].state.terminated.startedAt}{"\n"}' \
+      >> "$RESULTS_DIR/${POD_NAME}.log" 2>/dev/null || true
+  done
+fi
+
 # Parse results
 echo "  Parsing results..."
-"$SCRIPT_DIR/parse-results.sh" "$RESULTS_DIR" "$BENCHMARK_TYPE" "$GPU_TYPE" "$TOTAL_GPUS" "$NUM_NODES" \
+"$SCRIPT_DIR/parse-results.sh" "$RESULTS_DIR" "$BENCHMARK_TYPE" "$GPU_TYPE" "$TOTAL_GPUS" "$NUM_NODES" "${RUNTIME_CLASS:-default}" \
   > "$RESULTS_DIR/summary.json" 2>/dev/null || echo "{\"error\": \"parse failed\"}" > "$RESULTS_DIR/summary.json"
 
 # Store as ConfigMap for dashboard
@@ -354,11 +400,11 @@ print_readable_summary() {
 
     for i in $(seq 0 $((num_tests - 1))); do
       local test_name avg_bw peak_bw
-      test_name=$(jq -r ".results[$i].test" "$json_file" 2>/dev/null | tr '_' ' ')
+      test_name=$(jq -r ".results[$i].test" "$json_file" 2>/dev/null | tr '_' ' ' | tr '[:lower:]' '[:upper:]')
       avg_bw=$(jq -r ".results[$i].avg_bus_bandwidth_gbps" "$json_file" 2>/dev/null)
       peak_bw=$(jq "[.results[$i].data_points[].busbw_gbps] | max" "$json_file" 2>/dev/null || echo "0")
 
-      echo -e "  ${BOLD}${test_name^^}${NC}"
+      echo -e "  ${BOLD}${test_name}${NC}"
       echo -e "    Avg bus bandwidth:   ${GREEN}${avg_bw} GB/s${NC}"
       echo -e "    Peak bus bandwidth:  ${GREEN}${peak_bw} GB/s${NC}"
       echo ""
@@ -406,6 +452,18 @@ print_readable_summary() {
       echo -e "  ${YELLOW}Training did not complete enough iterations for measurement.${NC}"
       echo "  Check logs for errors. Parser expects 'elapsed time per iteration (ms): X.XX' output."
     fi
+
+  elif [[ "$bench_type" == "coldstart" ]]; then
+    local cuda_init nvsmi_ms
+    cuda_init=$(jq -r '.results.cuda_init_ms // "n/a"' "$json_file" 2>/dev/null)
+    nvsmi_ms=$(jq -r '.results.nvidia_smi_ms // "n/a"' "$json_file" 2>/dev/null)
+    echo -e "  ${BOLD}GPU Cold-Start Latency${NC}"
+    echo -e "    CUDA/driver init:  ${GREEN}${cuda_init} ms${NC}"
+    echo -e "    nvidia-smi:        ${GREEN}${nvsmi_ms} ms${NC}"
+    echo ""
+    echo "  Cold-start latency is where sandboxed runtimes (gVisor, Kata)"
+    echo "  pay their largest cost. Compare runtimes with:"
+    echo "    ./scripts/compare-runtimes.sh --runtimes default,gvisor,kata-qemu-nvidia-gpu"
   fi
 
   echo ""

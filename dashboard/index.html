@@ -14,19 +14,36 @@
       <p class="subtitle">GPU Benchmarking on Kubernetes</p>
     </div>
     <div class="header-actions">
+      <a class="header-link" href="https://github.com/saiyam1814/kubemark-ai" target="_blank">GitHub</a>
       <button id="refresh-btn" onclick="loadResults()">Refresh</button>
     </div>
   </header>
 
   <nav class="tabs">
-    <button class="tab active" data-tab="nccl">NCCL Benchmarks</button>
+    <button class="tab active" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="nccl">NCCL Benchmarks</button>
     <button class="tab" data-tab="training">Training Benchmarks</button>
+    <button class="tab" data-tab="runtimes">Runtime Overhead</button>
     <button class="tab" data-tab="compare">Compare Runs</button>
   </nav>
 
   <main>
+    <!-- Overview Tab -->
+    <section id="overview-tab" class="tab-content active">
+      <div class="overview-hero">
+        <h2>GPU Benchmarking on Kubernetes &mdash; any GPU, any runtime, any isolation level</h2>
+        <p>NCCL bandwidth &middot; training throughput &middot; GPU cold-start latency &mdash; across container runtimes (runc, gVisor, Kata, vNode) and vCluster isolation, built on NVIDIA DGXC benchmarking recipes.</p>
+      </div>
+      <div class="stats-grid" id="overview-stats"></div>
+      <div id="overview-findings"></div>
+      <div class="chart-container">
+        <h3>Recent Runs</h3>
+        <div id="overview-runs-table"></div>
+      </div>
+    </section>
+
     <!-- NCCL Tab -->
-    <section id="nccl-tab" class="tab-content active">
+    <section id="nccl-tab" class="tab-content">
       <div class="run-selector">
         <label>Select Run:</label>
         <select id="nccl-run-select" onchange="renderNCCLRun()"></select>
@@ -129,6 +146,57 @@
           <div class="info-item">
             <strong>Parallelism</strong>
             <p>Training uses Tensor Parallel (TP), Pipeline Parallel (PP), Expert Parallel (EP), and Data Parallel (DP). The parallelism config is auto-selected based on your GPU type to match NVIDIA's optimal settings.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Runtime Overhead Tab -->
+    <section id="runtimes-tab" class="tab-content">
+      <div class="run-selector">
+        <label>Select Comparison:</label>
+        <select id="runtime-compare-select" onchange="renderRuntimeComparison()"></select>
+      </div>
+      <div id="runtimes-empty" class="empty" style="display:none;">
+        <h2>No runtime comparisons yet</h2>
+        <p>Compare container runtimes (runc vs gVisor, Kata, vNode) with:</p>
+        <pre>./scripts/compare-runtimes.sh --runtimes default,gvisor --gpus 1 --gpu-type l4</pre>
+      </div>
+      <div id="runtimes-content">
+        <div class="stats-grid" id="runtime-stats"></div>
+        <div class="chart-container">
+          <h3>NCCL Bus Bandwidth by Runtime</h3>
+          <p class="chart-help">Same benchmark, same hardware, different container runtime. Sandboxed runtimes (gVisor nvproxy, Kata VMs) intercept the GPU driver interface &mdash; this shows what that costs on communication bandwidth. Higher is better.</p>
+          <canvas id="runtime-nccl-chart"></canvas>
+        </div>
+        <div class="chart-container">
+          <h3>GPU Cold-Start Latency by Runtime</h3>
+          <p class="chart-help">Time to initialize the GPU driver stack and launch the first CUDA kernel inside a fresh pod. This is where sandboxes pay their largest per-pod cost &mdash; critical for serverless/autoscaled GPU workloads. Lower is better.</p>
+          <canvas id="runtime-coldstart-chart"></canvas>
+        </div>
+        <div class="chart-container">
+          <h3>Overhead vs Baseline</h3>
+          <div id="runtime-overhead-table"></div>
+        </div>
+        <div class="info-box">
+          <h3>Understanding Runtime Overhead</h3>
+          <div class="info-grid">
+            <div class="info-item">
+              <strong>runc (default)</strong>
+              <p>Standard OCI runtime. Containers share the host kernel and talk to the NVIDIA driver directly. Baseline performance, weakest isolation.</p>
+            </div>
+            <div class="info-item">
+              <strong>gVisor (nvproxy)</strong>
+              <p>User-space kernel intercepts syscalls; GPU ioctls are proxied to the host driver. Steady-state bandwidth is usually near-native, but driver init pays per-call proxy overhead.</p>
+            </div>
+            <div class="info-item">
+              <strong>Kata Containers</strong>
+              <p>Each pod runs in a lightweight VM with the GPU passed through via VFIO. Strongest isolation; cold-start includes VM boot + in-guest driver init.</p>
+            </div>
+            <div class="info-item">
+              <strong>vNode</strong>
+              <p>Loft Labs runtime using Linux user namespaces + seccomp. No VM, no syscall emulation &mdash; expected overhead is minimal, closest to runc of the sandboxed options.</p>
+            </div>
           </div>
         </div>
       </div>

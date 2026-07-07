@@ -107,6 +107,22 @@ fi
 
 echo ""
 
+# --- Step 3b: Runtime Classes (optional, for runtime overhead benchmarking) ---
+echo -e "${CYAN}[3b/4]${NC} ${BOLD}Checking RuntimeClasses (optional)${NC}"
+echo ""
+RUNTIME_CLASSES=$(kubectl get runtimeclass -o jsonpath='{range .items[*]}{.metadata.name}{" "}{end}' 2>/dev/null || echo "")
+if [[ -n "$RUNTIME_CLASSES" ]]; then
+  echo -e "  ${GREEN}✓${NC} RuntimeClasses found: ${BOLD}$RUNTIME_CLASSES${NC}"
+  echo -e "  ${DIM}Compare runtime overhead with:${NC}"
+  echo -e "  ${DIM}  ./scripts/compare-runtimes.sh --runtimes default,<runtime-class>${NC}"
+else
+  echo -e "  ${DIM}– No RuntimeClasses defined (only needed for sandboxed runtime benchmarking)${NC}"
+  echo -e "  ${DIM}  gVisor:  https://gvisor.dev/docs/user_guide/gpu/${NC}"
+  echo -e "  ${DIM}  Kata:    https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/gpu-operator-kata.html${NC}"
+  echo -e "  ${DIM}  vNode:   https://www.vnode.com/docs/${NC}"
+fi
+echo ""
+
 # --- Step 4: MPI Operator ---
 echo -e "${CYAN}[4/4]${NC} ${BOLD}Installing MPI Operator${NC}"
 echo ""

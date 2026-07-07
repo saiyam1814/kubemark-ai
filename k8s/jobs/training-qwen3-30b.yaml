@@ -18,9 +18,16 @@ spec:
       replicas: 1
       template:
         spec:
+          ${RUNTIME_CLASS_FIELD}
+          # Tolerate GPU taint: needed when RuntimeClass pins launcher to GPU nodes
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Exists
+              effect: NoSchedule
+          restartPolicy: OnFailure
           containers:
             - name: launcher
-              image: nvcr.io/nvidia/nemo:25.11.01
+              image: nvcr.io/nvidia/nemo:26.04.00
               env:
                 - name: OMPI_ALLOW_RUN_AS_ROOT
                   value: "1"
@@ -104,9 +111,12 @@ spec:
                       $FP8_FLAGS \
                       --log-interval 1
 
+                  MPIRUN_RC=$?
+
                   echo "========================================================"
                   echo "  Complete: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
                   echo "========================================================"
+                  exit ${MPIRUN_RC:-1}
               resources:
                 requests:
                   cpu: "4"
@@ -121,11 +131,12 @@ spec:
             model: qwen3-30b
             run-id: "${RUN_ID}"
         spec:
+          ${RUNTIME_CLASS_FIELD}
           imagePullSecrets:
             - name: ngc-secret
           containers:
             - name: worker
-              image: nvcr.io/nvidia/nemo:25.11.01
+              image: nvcr.io/nvidia/nemo:26.04.00
               env:
                 - name: HF_TOKEN
                   valueFrom:

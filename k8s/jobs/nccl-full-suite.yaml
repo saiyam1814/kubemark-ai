@@ -24,9 +24,16 @@ spec:
           annotations:
             sidecar.istio.io/inject: "false"
         spec:
+          ${RUNTIME_CLASS_FIELD}
+          # Tolerate GPU taint: needed when RuntimeClass pins launcher to GPU nodes
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Exists
+              effect: NoSchedule
+          restartPolicy: OnFailure
           containers:
             - name: launcher
-              image: ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.29.2-1-2276a5e
+              image: ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.30.4-1-61f74e3
               env:
                 - name: OMPI_ALLOW_RUN_AS_ROOT
                   value: "1"
@@ -57,41 +64,48 @@ spec:
                     -mca btl ^openib -mca btl_tcp_if_exclude lo,docker0"
 
                   NCCL_ARGS="-b 8 -e 16G -f 2 -g 1 -n 20 -w 5"
+                  SUITE_RC=0
 
                   echo ""
                   echo ">>> [1/5] AllReduce"
                   echo "---"
                   mpirun --allow-run-as-root $MPI_ARGS \
                     /opt/nccl_tests/build/all_reduce_perf $NCCL_ARGS
+                  SUITE_RC=$((SUITE_RC + $?))
                   echo ""
 
                   echo ">>> [2/5] AllGather"
                   echo "---"
                   mpirun --allow-run-as-root $MPI_ARGS \
                     /opt/nccl_tests/build/all_gather_perf $NCCL_ARGS
+                  SUITE_RC=$((SUITE_RC + $?))
                   echo ""
 
                   echo ">>> [3/5] ReduceScatter"
                   echo "---"
                   mpirun --allow-run-as-root $MPI_ARGS \
                     /opt/nccl_tests/build/reduce_scatter_perf $NCCL_ARGS
+                  SUITE_RC=$((SUITE_RC + $?))
                   echo ""
 
                   echo ">>> [4/5] AllToAll"
                   echo "---"
                   mpirun --allow-run-as-root $MPI_ARGS \
                     /opt/nccl_tests/build/alltoall_perf $NCCL_ARGS -d uint8
+                  SUITE_RC=$((SUITE_RC + $?))
                   echo ""
 
                   echo ">>> [5/5] SendRecv"
                   echo "---"
                   mpirun --allow-run-as-root $MPI_ARGS \
                     /opt/nccl_tests/build/sendrecv_perf $NCCL_ARGS -d uint8
+                  SUITE_RC=$((SUITE_RC + $?))
                   echo ""
 
                   echo "========================================================"
                   echo "  Suite complete: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
                   echo "========================================================"
+                  exit ${SUITE_RC:-1}
               resources:
                 requests:
                   cpu: "1"
@@ -108,9 +122,10 @@ spec:
           annotations:
             sidecar.istio.io/inject: "false"
         spec:
+          ${RUNTIME_CLASS_FIELD}
           containers:
             - name: worker
-              image: ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.29.2-1-2276a5e
+              image: ghcr.io/coreweave/nccl-tests:12.9.1-devel-ubuntu22.04-nccl2.30.4-1-61f74e3
               securityContext:
                 capabilities:
                   add:

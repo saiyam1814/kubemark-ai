@@ -23,6 +23,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/results":
             self.serve_results()
+        elif self.path == "/api/comparisons":
+            self.serve_comparisons()
         elif self.path == "/":
             self.path = "/index.html"
             self.serve_static()
@@ -46,6 +48,23 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(json.dumps(results, indent=2).encode())
+
+    def serve_comparisons(self):
+        """Serve all runtime comparison reports as JSON array."""
+        comparisons = []
+        pattern = os.path.join(self.results_dir, "compare-*/comparison.json")
+        for filepath in sorted(glob.glob(pattern)):
+            try:
+                with open(filepath) as f:
+                    comparisons.append(json.load(f))
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Warning: Could not read {filepath}: {e}", file=sys.stderr)
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(json.dumps(comparisons, indent=2).encode())
 
     def serve_static(self):
         """Serve static files from the dashboard directory."""

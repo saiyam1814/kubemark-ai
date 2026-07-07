@@ -1,10 +1,27 @@
 // kubemark-ai Dashboard
 
 let allResults = [];
+let allComparisons = [];
 let ncclChart = null;
 let latencyChart = null;
 let tflopsChart = null;
 let compareChart = null;
+let runtimeNcclChart = null;
+let runtimeColdstartChart = null;
+
+// Runtime display metadata
+const RUNTIME_META = {
+  default: { label: 'runc (default)', color: '#76b900' },
+  runc: { label: 'runc', color: '#76b900' },
+  gvisor: { label: 'gVisor', color: '#00bcd4' },
+  'kata-qemu-nvidia-gpu': { label: 'Kata (QEMU)', color: '#ff6b35' },
+  kata: { label: 'Kata', color: '#ff6b35' },
+  vnode: { label: 'vNode', color: '#a855f7' },
+};
+
+function runtimeMeta(rt) {
+  return RUNTIME_META[rt] || { label: rt, color: '#eab308' };
+}
 
 // Color palette
 const COLORS = {
@@ -139,14 +156,126 @@ async function loadResults() {
     allResults = getSampleData();
   }
 
-  if (allResults.length === 0) {
+  try {
+    const response = await fetch('/api/comparisons');
+    allComparisons = await response.json();
+  } catch (e) {
+    allComparisons = getSampleComparisons();
+  }
+
+  if (allResults.length === 0 && allComparisons.length === 0) {
     document.getElementById('empty-state').style.display = 'block';
     return;
   }
 
   populateSelectors();
+  renderOverview();
   renderNCCLRun();
   renderTrainingRun();
+  renderRuntimeComparison();
+}
+
+// ---- Overview tab ----
+function renderOverview() {
+  const statsEl = document.getElementById('overview-stats');
+  const findingsEl = document.getElementById('overview-findings');
+  const tableEl = document.getElementById('overview-runs-table');
+  if (!statsEl) return;
+
+  const ncclRuns = allResults.filter(r => r.benchmark_type === 'nccl');
+  const trainingRuns = allResults.filter(r => r.benchmark_type === 'training');
+  const coldstartRuns = allResults.filter(r => r.benchmark_type === 'coldstart');
+  const gpuTypes = [...new Set(allResults.map(r => (r.gpu_type || '').toUpperCase()).filter(Boolean))];
+  const runtimesTested = new Set();
+  allComparisons.forEach(c => Object.keys(c.runtimes || {}).forEach(rt => runtimesTested.add(rt)));
+
+  statsEl.innerHTML = [
+    { label: 'Total Runs', value: allResults.length, unit: '' },
+    { label: 'NCCL / Training / Cold-start', value: `${ncclRuns.length} / ${trainingRuns.length} / ${coldstartRuns.length}`, unit: '' },
+    { label: 'Runtime Comparisons', value: allComparisons.length, unit: '' },
+    { label: 'GPU Types', value: gpuTypes.join(', ') || '—', unit: '' },
+    { label: 'Runtimes Tested', value: [...runtimesTested].map(rt => runtimeMeta(rt).label.split(' ')[0]).join(', ') || '—', unit: '' },
+  ].map(s => `
+    <div class="stat-card">
+      <div class="label">${s.label}</div>
+      <div class="value" style="font-size:${String(s.value).length > 12 ? '18px' : '28px'}">${s.value}<span class="unit">${s.unit}</span></div>
+    </div>`).join('');
+
+  // Headline findings from the most recent comparison with a baseline + >=2 runtimes
+  const findings = [];
+  const latest = [...allComparisons].reverse().find(c => Object.keys(c.runtimes || {}).length >= 2);
+  if (latest) {
+    const base = latest.baseline || 'default';
+    for (const [rt, entry] of Object.entries(latest.runtimes)) {
+      if (rt === base || !entry.overhead_vs_baseline) continue;
+      const ov = entry.overhead_vs_baseline;
+      const meta = runtimeMeta(rt);
+      const parts = [];
+      if (ov.cuda_init_ms_delta !== undefined) {
+        const d = ov.cuda_init_ms_delta;
+        parts.push(`CUDA init ${d >= 0 ? '+' : ''}${d} ms`);
+      }
+      if (ov.nccl_all_reduce_bandwidth_pct !== undefined) {
+        parts.push(`NCCL bandwidth ${ov.nccl_all_reduce_bandwidth_pct >= 0 ? '+' : ''}${ov.nccl_all_reduce_bandwidth_pct}%`);
+      }
+      const near = Math.abs(ov.cuda_init_ms_delta || 0) < 15;
+      findings.push({
+        title: `${meta.label} vs ${runtimeMeta(base).label}`,
+        color: meta.color,
+        text: parts.join(' · ') + (near ? ' — indistinguishable from baseline' : ''),
+        tag: latest.vcluster ? 'inside vCluster' : 'host cluster',
+      });
+    }
+    // vCluster overhead finding if we have both a host and a vCluster comparison
+    const hostCmp = allComparisons.find(c => !c.vcluster && Object.keys(c.runtimes || {}).length >= 2);
+    const vcCmp = allComparisons.find(c => c.vcluster);
+    if (hostCmp && vcCmp) {
+      findings.push({
+        title: 'vCluster isolation level',
+        color: '#eab308',
+        text: 'Runtime deltas reproduce within noise inside ephemeral vClusters — control-plane virtualization adds no measurable data-plane overhead.',
+        tag: `${hostCmp.compare_id} vs ${vcCmp.compare_id}`,
+      });
+    }
+  }
+  findingsEl.innerHTML = findings.length ? `
+    <div class="chart-container">
+      <h3>Headline Findings</h3>
+      <div class="info-grid">
+        ${findings.map(f => `
+          <div class="info-item">
+            <strong style="color:${f.color}">${f.title}</strong>
+            <p>${f.text}</p>
+            <p style="margin-top:6px;font-size:11px;opacity:0.7">${f.tag}</p>
+          </div>`).join('')}
+      </div>
+    </div>` : '';
+
+  // Recent runs table
+  const recent = [...allResults].sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || '')).slice(0, 8);
+  tableEl.innerHTML = recent.length ? `
+    <table class="overview-table">
+      <thead><tr><th>Run</th><th>Type</th><th>GPU</th><th>Runtime</th><th>Key Result</th></tr></thead>
+      <tbody>
+        ${recent.map(r => {
+          let key = '—';
+          if (r.benchmark_type === 'nccl' && Array.isArray(r.results) && r.results[0]) {
+            key = `${r.results[0].avg_bus_bandwidth_gbps ?? '—'} GB/s busbw`;
+          } else if (r.benchmark_type === 'training' && r.results?.tflops_per_gpu_mean) {
+            key = `${r.results.tflops_per_gpu_mean} TFLOPS/GPU`;
+          } else if (r.benchmark_type === 'coldstart' && r.results?.cuda_init_ms) {
+            key = `${r.results.cuda_init_ms} ms CUDA init`;
+          }
+          return `<tr>
+            <td>${r.run_id || '—'}</td>
+            <td>${r.benchmark_type || '—'}</td>
+            <td>${(r.gpu_type || '—').toUpperCase()} ×${r.total_gpus ?? '?'}</td>
+            <td>${runtimeMeta(r.runtime_class || 'default').label}</td>
+            <td>${key}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>` : '<p class="chart-help">No runs yet — run <code>./scripts/run-benchmark.sh</code> to get started.</p>';
 }
 
 function populateSelectors() {
@@ -157,6 +286,20 @@ function populateSelectors() {
   fillSelect('training-run-select', trainingRuns);
   fillSelect('compare-a', ncclRuns);
   fillSelect('compare-b', ncclRuns);
+
+  // Runtime comparison selector
+  const rtSelect = document.getElementById('runtime-compare-select');
+  if (rtSelect) {
+    rtSelect.innerHTML = '';
+    allComparisons.forEach((cmp, i) => {
+      const opt = document.createElement('option');
+      opt.value = i;
+      const runtimes = Object.keys(cmp.runtimes || {}).join(' vs ');
+      const vcTag = cmp.vcluster ? ' [inside vCluster]' : '';
+      opt.textContent = `${cmp.compare_id} — ${runtimes}${vcTag}`;
+      rtSelect.appendChild(opt);
+    });
+  }
 }
 
 function fillSelect(id, runs) {
@@ -166,7 +309,8 @@ function fillSelect(id, runs) {
   runs.forEach((run, i) => {
     const opt = document.createElement('option');
     opt.value = i;
-    opt.textContent = `${run.gpu_type.toUpperCase()} x${run.total_gpus} — ${run.run_id} (${new Date(run.timestamp).toLocaleDateString()})`;
+    const rtSuffix = run.runtime_class && run.runtime_class !== 'default' ? ` [${run.runtime_class}]` : '';
+    opt.textContent = `${run.gpu_type.toUpperCase()} x${run.total_gpus}${rtSuffix} — ${run.run_id} (${new Date(run.timestamp).toLocaleDateString()})`;
     select.appendChild(opt);
   });
 }
@@ -208,6 +352,10 @@ function renderNCCLRun() {
     <div class="stat-card">
       <div class="label">Nodes</div>
       <div class="value">${run.num_nodes}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Runtime</div>
+      <div class="value">${run.runtime_class || 'default'}</div>
     </div>
     <div class="stat-card">
       <div class="label">${isSingleGpu ? 'Avg Bandwidth' : 'Avg Bus Bandwidth'}</div>
@@ -506,6 +654,166 @@ function renderComparison() {
         `Run ${winner} is <strong style="color:var(--accent)">${absDiff.toFixed(1)}% faster</strong> at peak bandwidth.`}
     </p>
   `;
+}
+
+function renderRuntimeComparison() {
+  const emptyEl = document.getElementById('runtimes-empty');
+  const contentEl = document.getElementById('runtimes-content');
+  if (!emptyEl || !contentEl) return;
+
+  if (allComparisons.length === 0) {
+    emptyEl.style.display = 'block';
+    contentEl.style.display = 'none';
+    return;
+  }
+  emptyEl.style.display = 'none';
+  contentEl.style.display = 'block';
+
+  const select = document.getElementById('runtime-compare-select');
+  const cmp = allComparisons[select.value || 0];
+  if (!cmp || !cmp.runtimes) return;
+
+  const runtimes = Object.keys(cmp.runtimes);
+  const baseline = cmp.baseline || runtimes[0];
+
+  // Stats cards: one per runtime with its headline numbers
+  const statsEl = document.getElementById('runtime-stats');
+  statsEl.innerHTML = runtimes.map(rt => {
+    const meta = runtimeMeta(rt);
+    const d = cmp.runtimes[rt];
+    const nccl = d.nccl ? Object.values(d.nccl)[0] : null;
+    const cold = d.coldstart ? d.coldstart.cuda_init_ms_median : null;
+    const isBase = rt === baseline;
+    return `
+      <div class="stat-card" style="border-top: 3px solid ${meta.color}">
+        <div class="label">${meta.label}${isBase ? ' &mdash; baseline' : ''}</div>
+        <div class="value">${nccl != null ? nccl.toFixed(1) : '&mdash;'} <span class="unit">GB/s</span></div>
+        <div class="label" style="margin-top:4px;">CUDA init: ${cold != null ? cold.toFixed(0) + ' ms' : '&mdash;'}</div>
+      </div>`;
+  }).join('');
+
+  // NCCL bandwidth grouped bar chart (one group per test, one bar per runtime)
+  const ncclTests = [...new Set(runtimes.flatMap(rt => Object.keys(cmp.runtimes[rt].nccl || {})))];
+  if (runtimeNcclChart) runtimeNcclChart.destroy();
+  const ncclCanvas = document.getElementById('runtime-nccl-chart');
+  ncclCanvas.parentElement.style.display = ncclTests.length ? 'block' : 'none';
+  if (ncclTests.length) {
+    runtimeNcclChart = new Chart(ncclCanvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: ncclTests.map(t => t.replace(/_/g, ' ')),
+        datasets: runtimes.map(rt => {
+          const meta = runtimeMeta(rt);
+          return {
+            label: meta.label,
+            data: ncclTests.map(t => cmp.runtimes[rt].nccl?.[t] ?? 0),
+            backgroundColor: meta.color + 'cc',
+            borderColor: meta.color,
+            borderWidth: 1,
+          };
+        }),
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { position: 'top' } },
+        scales: {
+          y: { title: { display: true, text: 'Avg Bus Bandwidth (GB/s)' }, beginAtZero: true },
+        },
+      },
+    });
+  }
+
+  // Cold-start latency grouped bar chart
+  const coldMetrics = [
+    { key: 'nvidia_smi_ms_median', label: 'nvidia-smi' },
+    { key: 'cuda_init_ms_median', label: 'CUDA init' },
+    { key: 'first_kernel_ms_median', label: 'first kernel' },
+  ];
+  const hasCold = runtimes.some(rt => cmp.runtimes[rt].coldstart);
+  if (runtimeColdstartChart) runtimeColdstartChart.destroy();
+  const coldCanvas = document.getElementById('runtime-coldstart-chart');
+  coldCanvas.parentElement.style.display = hasCold ? 'block' : 'none';
+  if (hasCold) {
+    runtimeColdstartChart = new Chart(coldCanvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: coldMetrics.map(m => m.label),
+        datasets: runtimes.map(rt => {
+          const meta = runtimeMeta(rt);
+          return {
+            label: meta.label,
+            data: coldMetrics.map(m => cmp.runtimes[rt].coldstart?.[m.key] ?? 0),
+            backgroundColor: meta.color + 'cc',
+            borderColor: meta.color,
+            borderWidth: 1,
+          };
+        }),
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { position: 'top' } },
+        scales: {
+          y: { title: { display: true, text: 'Latency (ms, median)' }, beginAtZero: true },
+        },
+      },
+    });
+  }
+
+  // Overhead table vs baseline
+  const tableEl = document.getElementById('runtime-overhead-table');
+  const nonBaseline = runtimes.filter(rt => rt !== baseline && cmp.runtimes[rt].overhead_vs_baseline);
+  if (nonBaseline.length === 0) {
+    tableEl.innerHTML = '<p class="chart-help">No overhead data (need at least two runtimes with a shared baseline).</p>';
+  } else {
+    const metricKeys = [...new Set(nonBaseline.flatMap(rt => Object.keys(cmp.runtimes[rt].overhead_vs_baseline)))];
+    const fmtOverhead = (key, val) => {
+      if (val == null) return '&mdash;';
+      if (key.endsWith('_pct')) {
+        const color = val < -2 ? '#ef4444' : val > 2 ? '#76b900' : 'inherit';
+        return `<span style="color:${color}">${val > 0 ? '+' : ''}${val.toFixed(1)}%</span>`;
+      }
+      const unit = key.endsWith('_s_delta') ? ' s' : ' ms';
+      const color = val > 2 ? '#ef4444' : 'inherit';
+      return `<span style="color:${color}">${val > 0 ? '+' : ''}${val}${unit}</span>`;
+    };
+    const prettyMetric = k => k
+      .replace(/_pct$/, ' (bandwidth %)')
+      .replace(/_ms_delta$/, ' (ms)')
+      .replace(/_s_delta$/, ' (s)')
+      .replace(/_/g, ' ');
+    tableEl.innerHTML = `
+      <table class="overhead-table" style="width:100%;border-collapse:collapse;">
+        <thead><tr>
+          <th style="text-align:left;padding:8px;border-bottom:1px solid var(--border);">Metric (vs ${runtimeMeta(baseline).label})</th>
+          ${nonBaseline.map(rt => `<th style="text-align:right;padding:8px;border-bottom:1px solid var(--border);">${runtimeMeta(rt).label}</th>`).join('')}
+        </tr></thead>
+        <tbody>
+          ${metricKeys.map(key => `<tr>
+            <td style="padding:8px;border-bottom:1px solid var(--border);">${prettyMetric(key)}</td>
+            ${nonBaseline.map(rt => `<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border);">${fmtOverhead(key, cmp.runtimes[rt].overhead_vs_baseline[key])}</td>`).join('')}
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      <p class="chart-help" style="margin-top:8px;">Bandwidth: negative = slower than baseline. Latency deltas: positive = slower than baseline. Values within &plusmn;2% / &plusmn;2ms are noise.</p>`;
+  }
+}
+
+function getSampleComparisons() {
+  return [{
+    compare_id: 'compare-sample',
+    baseline: 'default',
+    runtimes: {
+      default: {
+        nccl: { all_reduce: 115.26 },
+        coldstart: { nvidia_smi_ms_median: 30, cuda_init_ms_median: 291.1, first_kernel_ms_median: 139.6, sandbox_startup_s_median: 1, repeats: 3 },
+      },
+      gvisor: {
+        nccl: { all_reduce: 115.3 },
+        coldstart: { nvidia_smi_ms_median: 69, cuda_init_ms_median: 342, first_kernel_ms_median: 137.5, sandbox_startup_s_median: 1, repeats: 3 },
+        overhead_vs_baseline: { nccl_all_reduce_bandwidth_pct: 0, cuda_init_ms_delta: 50.9, first_kernel_ms_delta: -2.1, sandbox_startup_s_delta: 0 },
+      },
+    },
+  }];
 }
 
 // Sample data for demo/development

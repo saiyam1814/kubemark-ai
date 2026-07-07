@@ -1,0 +1,80 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: coldstart-${SHORT_ID}
+  namespace: ${NAMESPACE}
+  labels:
+    app: kubemark-ai
+    benchmark: coldstart
+    run-id: "${RUN_ID}"
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: kubemark-ai
+        benchmark: coldstart
+        run-id: "${RUN_ID}"
+    spec:
+      ${RUNTIME_CLASS_FIELD}
+      restartPolicy: Never
+      containers:
+        - name: coldstart
+          image: pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              echo "=== kubemark-ai GPU Cold-Start Benchmark ==="
+              echo "Runtime class: ${RUNTIME_CLASS}"
+              echo "Run ID: ${RUN_ID}"
+              echo "Container entrypoint reached: $(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+              echo "============================================"
+
+              # 1. First nvidia-smi — exercises device node access.
+              #    In sandboxed runtimes (gVisor nvproxy, Kata VM) this path is proxied
+              #    or virtualized, so it captures per-call driver overhead.
+              T0=$(date +%s%3N)
+              nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
+              T1=$(date +%s%3N)
+              NVSMI_MS=$((T1 - T0))
+              echo "COLDSTART nvidia_smi_ms=${NVSMI_MS:-0}"
+
+              # 2. CUDA context init + first kernel launch via PyTorch.
+              python3 -u -c '
+              import time, json
+              t0 = time.time()
+              import torch
+              import_ms = (time.time() - t0) * 1000
+
+              t0 = time.time()
+              torch.cuda.init()
+              x = torch.zeros(1, device="cuda")
+              torch.cuda.synchronize()
+              cuda_init_ms = (time.time() - t0) * 1000
+
+              t0 = time.time()
+              a = torch.randn(4096, 4096, device="cuda")
+              b = torch.randn(4096, 4096, device="cuda")
+              (a @ b).sum().item()
+              torch.cuda.synchronize()
+              first_kernel_ms = (time.time() - t0) * 1000
+
+              print(f"COLDSTART torch_import_ms={import_ms:.1f}")
+              print(f"COLDSTART cuda_init_ms={cuda_init_ms:.1f}")
+              print(f"COLDSTART first_kernel_ms={first_kernel_ms:.1f}")
+              print("COLDSTART_RESULT " + json.dumps({
+                  "gpu": torch.cuda.get_device_name(0),
+                  "torch_import_ms": round(import_ms, 1),
+                  "cuda_init_ms": round(cuda_init_ms, 1),
+                  "first_kernel_ms": round(first_kernel_ms, 1),
+              }))
+              '
+
+              echo "============================================"
+              echo "End: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          resources:
+            requests:
+              nvidia.com/gpu: 1
+            limits:
+              nvidia.com/gpu: 1

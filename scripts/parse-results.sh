@@ -2,13 +2,14 @@
 set -euo pipefail
 
 # kubemark-ai: Parse benchmark results into structured JSON
-# Usage: ./scripts/parse-results.sh <results_dir> <benchmark_type> [gpu_type] [total_gpus] [num_nodes]
+# Usage: ./scripts/parse-results.sh <results_dir> <benchmark_type> [gpu_type] [total_gpus] [num_nodes] [runtime_class]
 
-RESULTS_DIR="${1:?Usage: parse-results.sh <results_dir> <benchmark_type> [gpu_type] [total_gpus] [num_nodes]}"
-BENCHMARK_TYPE="${2:?Specify benchmark type: nccl or training}"
+RESULTS_DIR="${1:?Usage: parse-results.sh <results_dir> <benchmark_type> [gpu_type] [total_gpus] [num_nodes] [runtime_class]}"
+BENCHMARK_TYPE="${2:?Specify benchmark type: nccl, training, or coldstart}"
 GPU_TYPE="${3:-unknown}"
 TOTAL_GPUS="${4:-0}"
 NUM_NODES="${5:-0}"
+RUNTIME_CLASS="${6:-default}"
 
 RUN_ID=$(basename "$RESULTS_DIR")
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -129,6 +130,61 @@ parse_nccl_full_suite() {
   local output="${results[*]}"
   rm -rf "$tmpdir"
   echo "$output"
+}
+
+parse_coldstart() {
+  local log_file="$1"
+
+  if [[ ! -f "$log_file" ]]; then
+    echo "null"
+    return
+  fi
+
+  # In-container measurements printed as: COLDSTART key=value
+  local nvsmi_ms torch_import_ms cuda_init_ms first_kernel_ms
+  nvsmi_ms=$(grep -o 'COLDSTART nvidia_smi_ms=[0-9.]*' "$log_file" 2>/dev/null | head -1 | cut -d= -f2 || true)
+  torch_import_ms=$(grep -o 'COLDSTART torch_import_ms=[0-9.]*' "$log_file" 2>/dev/null | head -1 | cut -d= -f2 || true)
+  cuda_init_ms=$(grep -o 'COLDSTART cuda_init_ms=[0-9.]*' "$log_file" 2>/dev/null | head -1 | cut -d= -f2 || true)
+  first_kernel_ms=$(grep -o 'COLDSTART first_kernel_ms=[0-9.]*' "$log_file" 2>/dev/null | head -1 | cut -d= -f2 || true)
+
+  # Pod lifecycle timestamps appended by run-benchmark.sh:
+  # POD_TIMESTAMPS created=<ts> scheduled=<ts> started=<ts>
+  # sandbox_startup = container startedAt - PodScheduled (includes image pull
+  # on first run; pre-pull or repeat runs to isolate sandbox creation cost)
+  local created scheduled started sandbox_startup_s="null"
+  local ts_line
+  ts_line=$(grep '^POD_TIMESTAMPS' "$log_file" | head -1 || true)
+  if [[ -n "$ts_line" ]]; then
+    created=$(echo "$ts_line" | grep -o 'created=[^ ]*' | cut -d= -f2 || true)
+    scheduled=$(echo "$ts_line" | grep -o 'scheduled=[^ ]*' | cut -d= -f2 || true)
+    started=$(echo "$ts_line" | grep -o 'started=[^ ]*' | cut -d= -f2 || true)
+    to_epoch() {
+      # macOS and Linux compatible ISO8601 -> epoch
+      date -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" +%s 2>/dev/null || date -d "$1" +%s 2>/dev/null || echo ""
+    }
+    local e_sched e_start
+    e_sched=$(to_epoch "$scheduled")
+    e_start=$(to_epoch "$started")
+    if [[ -n "$e_sched" && -n "$e_start" ]]; then
+      sandbox_startup_s=$((e_start - e_sched))
+    fi
+  fi
+
+  if [[ -z "$cuda_init_ms" && -z "$nvsmi_ms" ]]; then
+    echo '{"status": "INCOMPLETE"}'
+    return
+  fi
+
+  cat <<EOF
+{
+    "status": "COMPLETE",
+    "nvidia_smi_ms": ${nvsmi_ms:-null},
+    "torch_import_ms": ${torch_import_ms:-null},
+    "cuda_init_ms": ${cuda_init_ms:-null},
+    "first_kernel_ms": ${first_kernel_ms:-null},
+    "sandbox_startup_s": ${sandbox_startup_s}
+  }
+EOF
 }
 
 parse_training() {
@@ -274,6 +330,7 @@ case "$BENCHMARK_TYPE" in
   "gpu_type": "$GPU_TYPE",
   "total_gpus": $TOTAL_GPUS,
   "num_nodes": $NUM_NODES,
+  "runtime_class": "$RUNTIME_CLASS",
   "results": [
     $NCCL_RESULTS
   ]
@@ -293,7 +350,26 @@ EOF
   "gpu_type": "$GPU_TYPE",
   "total_gpus": $TOTAL_GPUS,
   "num_nodes": $NUM_NODES,
+  "runtime_class": "$RUNTIME_CLASS",
   "results": $TRAINING_RESULT
+}
+EOF
+    ;;
+
+  coldstart)
+    LOG_FILE=$(find "$RESULTS_DIR" -name "*.log" -type f | head -1)
+    COLDSTART_RESULT=$(parse_coldstart "$LOG_FILE")
+
+    cat <<EOF
+{
+  "run_id": "$RUN_ID",
+  "timestamp": "$TIMESTAMP",
+  "benchmark_type": "coldstart",
+  "gpu_type": "$GPU_TYPE",
+  "total_gpus": $TOTAL_GPUS,
+  "num_nodes": $NUM_NODES,
+  "runtime_class": "$RUNTIME_CLASS",
+  "results": $COLDSTART_RESULT
 }
 EOF
     ;;

@@ -20,6 +20,7 @@ spec:
         run-id: "${RUN_ID}"
         training.kubeflow.org/job-role: launcher
     spec:
+      ${RUNTIME_CLASS_FIELD}
       restartPolicy: Never
       containers:
         - name: trainer

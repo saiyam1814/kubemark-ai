@@ -1,0 +1,44 @@
+{
+  "compare_id": "compare-20260707-143651",
+  "baseline": "default",
+  "vcluster": true,
+  "runtimes": {
+    "default": {
+      "coldstart": {
+        "nvidia_smi_ms_median": 30,
+        "cuda_init_ms_median": 295.4,
+        "first_kernel_ms_median": 128.3,
+        "sandbox_startup_s_median": 1,
+        "repeats": 3
+      }
+    },
+    "gvisor": {
+      "coldstart": {
+        "nvidia_smi_ms_median": 56,
+        "cuda_init_ms_median": 336.8,
+        "first_kernel_ms_median": 150.2,
+        "sandbox_startup_s_median": 1,
+        "repeats": 3
+      },
+      "overhead_vs_baseline": {
+        "cuda_init_ms_delta": 41.4,
+        "first_kernel_ms_delta": 21.9,
+        "sandbox_startup_s_delta": 0
+      }
+    },
+    "vnode": {
+      "coldstart": {
+        "nvidia_smi_ms_median": 40,
+        "cuda_init_ms_median": 291.8,
+        "first_kernel_ms_median": 124.0,
+        "sandbox_startup_s_median": 2,
+        "repeats": 3
+      },
+      "overhead_vs_baseline": {
+        "cuda_init_ms_delta": -3.6,
+        "first_kernel_ms_delta": -4.3,
+        "sandbox_startup_s_delta": 1
+      }
+    }
+  }
+}
